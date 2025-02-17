@@ -30,7 +30,7 @@ class MarzipExtractor:
 
         self.base_route = self.extract_base_route(self.simulation_result)
         self.own_ship_static = self.extract_own_ship_static_info(self.simulation_result)
-        self.sils_events = self.extract_events_info(self.simulation_result)
+        self.events = self.extract_events_info(self.simulation_result)
 
     def flatten(self, item):
         """

@@ -216,8 +216,8 @@ class EventPlotter(MarzipExtractor):
 
 
 def main():
-    base_data_dir = "data"           # 원본 데이터가 있는 최상위 폴더
-    base_result_dir = "plot_result"  # 결과 플롯을 저장할 폴더
+    base_data_dir = "data/ver014_20205214_basic_test"           # 원본 데이터가 있는 최상위 폴더
+    base_result_dir = "plot_result/ver014_20205214_basic_test"  # 결과 플롯을 저장할 폴더
 
     # FileInputManager를 사용하여 base_data_dir 내의 모든 마집 파일을 재귀적으로 검색
     file_manager = FileInputManager(base_data_dir)

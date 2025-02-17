@@ -2,6 +2,7 @@ import os
 import csv
 import json
 import re
+import concurrent.futures
 from marzip_extractor import MarzipExtractor
 from file_input_manager import FileInputManager
 
@@ -14,7 +15,7 @@ class EventAnalyzer(MarzipExtractor):
     - 이벤트가 1개이면, 해당 이벤트의 플래그가 True이면 "NA", False이면 "Success"
     - 이벤트가 여러 개이면, 모든 플래그가 False이면 "Success", 하나라도 True가 있으면 "Fail"
     
-    생성자에서는 파일 인자를 받지 않고, analyze_file() 메서드를 통해 파일을 처리합니다.
+    analyze_file() 메서드를 통해 파일을 처리합니다.
     """
     def __init__(self):
         super().__init__()
@@ -36,11 +37,28 @@ class EventAnalyzer(MarzipExtractor):
         ca_path_gen_fail 플래그에 따라 결과를 분석하여 반환합니다.
         """
         self.marzip = marzip_file
-        self.run(marzip_file)  # run() 호출 후 self.sils_events 등 채워짐
-        self.events = self.sils_events
+        self.run(marzip_file)  
+        self.events = self.events
         result = self.analyze_dataset(self.events)
         return {"Result": result}
 
+def process_single_event(marzip_file):
+    """
+    단일 마집 파일에 대해 EventAnalyzer를 실행합니다.
+    성공 시 {"Folder": ..., "File": ..., "Result": ...} 형태의 딕셔너리를 반환하고,
+    실패하면 None을 반환합니다.
+    """
+    try:
+        analyzer = EventAnalyzer()
+        analysis = analyzer.analyze_file(marzip_file)
+        base_name = os.path.splitext(os.path.basename(marzip_file))[0]
+        parent_dir = os.path.dirname(marzip_file)
+        grandparent_dir = os.path.dirname(parent_dir) if parent_dir else ""
+        folder_info = os.path.basename(grandparent_dir) if grandparent_dir else ""
+        return {"Folder": folder_info, "File": base_name, "Result": analysis["Result"]}
+    except Exception as e:
+        print(f"Error processing {marzip_file}: {e}")
+        return None
 
 def write_csv(results, output_csv, fieldnames=None):
     if fieldnames is None:
@@ -51,11 +69,9 @@ def write_csv(results, output_csv, fieldnames=None):
         for row in results:
             writer.writerow(row)
 
-
 class EventAnalysisRunner:
     """
-    이벤트 마집 파일들을 읽어 분석을 수행하고,
-    각각의 결과를 CSV 파일로 저장하는 클래스입니다.
+    이벤트 마집 파일들을 병렬 처리하여 분석 결과를 CSV 파일로 저장하는 클래스입니다.
     """
     def __init__(self, event_folder):
         """
@@ -64,107 +80,59 @@ class EventAnalysisRunner:
         self.event_folder = event_folder
         self.file_manager = FileInputManager(event_folder)
 
-    def run(self):
-        event_files = sorted(
-            self.file_manager.get_sils_files(mode="marzip"),
-            key=lambda f: FileInputManager.natural_sort_key(os.path.basename(f))
-        )
+    def run_all_parallel(self):
+        # FileInputManager를 사용하여 모든 마집 파일을 재귀적으로 수집
+        marzip_files = self.file_manager.get_all_marzip_files()
+        print(f"총 {len(marzip_files)}개의 마집 파일을 찾았습니다.")
         results = []
-        for event_file in event_files:
-            base_name = os.path.splitext(os.path.basename(event_file))[0]
-            print(f"Processing {base_name} ...")
-            analyzer = EventAnalyzer()
-            analysis = analyzer.analyze_file(event_file)
-            # 폴더 정보: 상위 폴더 이름 (예: 해당 이벤트 파일의 상위 폴더 이름)
-            folder_info = os.path.basename(os.path.dirname(os.path.dirname(event_file)))
-            results.append({"Folder": folder_info, "File": base_name, "Result": analysis["Result"]})
+        with concurrent.futures.ProcessPoolExecutor() as executor:
+            for res in executor.map(process_single_event, marzip_files):
+                if res is not None:
+                    results.append(res)
         return results
 
-    def run_and_save(self):
-        results = self.run()
-        # 결과 폴더: event_folder의 상위 폴더 이름 사용
-        parent_dir = os.path.dirname(self.event_folder)
-        folder_name = os.path.basename(parent_dir)
-        result_dir = os.path.join("analysis_result", folder_name)
-        if not os.path.exists(result_dir):
-            os.makedirs(result_dir)
-        output_csv = os.path.join(result_dir, "event_analysis.csv")
-        # 요약 행 추가
-        count_success = sum(1 for r in results if r["Result"] == "Success")
-        count_fail = sum(1 for r in results if r["Result"] == "Fail")
-        count_na = sum(1 for r in results if r["Result"] == "NA")
-        summary_str = f"Success: {count_success}, Fail: {count_fail}, NA: {count_na}"
-        results.append({"Folder": "", "File": "Summary", "Result": summary_str})
-        write_csv(results, output_csv)
-        print(f"이벤트 분석 결과가 {output_csv}에 저장되었습니다.")
-
-
-# =====================
-# main 함수
-# =====================
-def main(AGGREGATE_RESULTS, base_data_dir):
-    # AGGREGATE_RESULTS가 True이면 모든 마집 파일을 한 번에 분석하여 통합 CSV 파일을 생성하고,
-    # False이면 각 이벤트 폴더별로 별도의 CSV 파일을 생성합니다.
-
-    # FileInputManager의 재귀 검색 기능으로 모든 마집 파일을 수집
-    file_manager = FileInputManager(base_data_dir)
-    marzip_files = file_manager.get_all_marzip_files()
-
-    if AGGREGATE_RESULTS:
-        all_results = []
-        for marzip_file in marzip_files:
-            base_name = os.path.splitext(os.path.basename(marzip_file))[0]
-            # 상위 폴더의 상위 폴더 이름을 폴더 정보로 사용 (없으면 빈 문자열)
-            parent_dir = os.path.dirname(marzip_file)
-            grandparent_dir = os.path.dirname(parent_dir) if parent_dir else ""
-            folder_info = os.path.basename(grandparent_dir) if grandparent_dir else ""
-            print(f"Processing: {marzip_file}")
-            analyzer = EventAnalyzer()
-            analysis = analyzer.analyze_file(marzip_file)
-            all_results.append({"Folder": folder_info, "File": base_name, "Result": analysis["Result"]})
-
-        common_result_dir = "analysis_result"
-        if not os.path.exists(common_result_dir):
-            os.makedirs(common_result_dir)
-        output_csv = os.path.join(common_result_dir, "all_event_analysis.csv")
-        count_success = sum(1 for r in all_results if r["Result"] == "Success")
-        count_fail = sum(1 for r in all_results if r["Result"] == "Fail")
-        count_na = sum(1 for r in all_results if r["Result"] == "NA")
-        summary_str = f"Success: {count_success}, Fail: {count_fail}, NA: {count_na}"
-        all_results.append({"Folder": "", "File": "Summary", "Result": summary_str})
-        write_csv(all_results, output_csv)
-        print(f"통합 이벤트 분석 결과가 {output_csv}에 저장되었습니다.")
-    else:
-        # AGGREGATE_RESULTS가 False인 경우, 파일들을 그룹화하여 각 그룹별로 CSV 생성
-        grouped = {}
-        for marzip_file in marzip_files:
-            base_name = os.path.splitext(os.path.basename(marzip_file))[0]
-            parent_dir = os.path.dirname(marzip_file)
-            grandparent_dir = os.path.dirname(parent_dir) if parent_dir else ""
-            folder_info = os.path.basename(grandparent_dir) if grandparent_dir else ""
-            if folder_info not in grouped:
-                grouped[folder_info] = []
-            print(f"Processing: {marzip_file}")
-            analyzer = EventAnalyzer()
-            analysis = analyzer.analyze_file(marzip_file)
-            grouped[folder_info].append({"Folder": folder_info, "File": base_name, "Result": analysis["Result"]})
-
-        for folder_info, results in grouped.items():
-            result_dir = os.path.join("analysis_result", folder_info)
-            if not os.path.exists(result_dir):
-                os.makedirs(result_dir)
-            output_csv = os.path.join(result_dir, "event_analysis.csv")
+    def run_and_save(self, aggregate_results=True):
+        results = self.run_all_parallel()
+        if aggregate_results:
+            common_result_dir = "analysis_result"
+            if not os.path.exists(common_result_dir):
+                os.makedirs(common_result_dir)
+            output_csv = os.path.join(common_result_dir, "all_event_analysis.csv")
             count_success = sum(1 for r in results if r["Result"] == "Success")
             count_fail = sum(1 for r in results if r["Result"] == "Fail")
             count_na = sum(1 for r in results if r["Result"] == "NA")
             summary_str = f"Success: {count_success}, Fail: {count_fail}, NA: {count_na}"
             results.append({"Folder": "", "File": "Summary", "Result": summary_str})
             write_csv(results, output_csv)
-            print(f"{folder_info} 이벤트 분석 결과가 {output_csv}에 저장되었습니다.")
+            print(f"통합 이벤트 분석 결과가 {output_csv}에 저장되었습니다.")
+        else:
+            # 폴더별로 그룹화하여 CSV 파일 생성
+            grouped = {}
+            for r in results:
+                folder = r["Folder"]
+                if folder not in grouped:
+                    grouped[folder] = []
+                grouped[folder].append(r)
+            for folder, group_results in grouped.items():
+                result_dir = os.path.join("analysis_result", folder)
+                if not os.path.exists(result_dir):
+                    os.makedirs(result_dir)
+                output_csv = os.path.join(result_dir, "event_analysis.csv")
+                count_success = sum(1 for r in group_results if r["Result"] == "Success")
+                count_fail = sum(1 for r in group_results if r["Result"] == "Fail")
+                count_na = sum(1 for r in group_results if r["Result"] == "NA")
+                summary_str = f"Success: {count_success}, Fail: {count_fail}, NA: {count_na}"
+                group_results.append({"Folder": "", "File": "Summary", "Result": summary_str})
+                write_csv(group_results, output_csv)
+                print(f"{folder} 이벤트 분석 결과가 {output_csv}에 저장되었습니다.")
+
+def main(AGGREGATE_RESULTS, base_data_dir):
+    runner = EventAnalysisRunner(base_data_dir)
+    runner.run_and_save(AGGREGATE_RESULTS)
     print("DONE")
 
 if __name__ == "__main__":
-
-    AGGREGATE_RESULTS = True # True 통합결과 / False 폴더별 결과
-    base_data_dir = "data/ver014_20205214_basic_test"  # 여러 이벤트 폴더가 있는 최상위 디렉토리
+    AGGREGATE_RESULTS = True  # True: 통합 결과, False: 폴더별 결과
+    base_data_dir = "data/ver014_20205215_basic_test"  # 여러 이벤트 폴더가 있는 최상위 디렉토리
+    analyzer = EventAnalyzer()
     main(AGGREGATE_RESULTS, base_data_dir)
