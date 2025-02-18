@@ -9,12 +9,6 @@ from file_input_manager import FileInputManager
 class EventAnalyzer(MarzipExtractor):
     """
     MarzipExtractor를 상속받아 이벤트 데이터를 분석하는 클래스입니다.
-    각 파일별로 ca_path_gen_fail 플래그를 기준으로 "Success", "Fail", 또는 "NA"를 판정합니다.
-    
-    - 이벤트가 0개이면 결과는 "NA"
-    - 이벤트가 1개이면, 해당 이벤트의 플래그가 True이면 "NA", False이면 "Success"
-    - 이벤트가 여러 개이면, 모든 플래그가 False이면 "Success", 하나라도 True가 있으면 "Fail"
-    
     analyze_file() 메서드를 통해 파일을 처리합니다.
     """
     def __init__(self):
@@ -38,7 +32,6 @@ class EventAnalyzer(MarzipExtractor):
         """
         self.marzip = marzip_file
         self.run(marzip_file)  
-        self.events = self.events
         result = self.analyze_dataset(self.events)
         return {"Result": result}
 
@@ -133,6 +126,6 @@ def main(AGGREGATE_RESULTS, base_data_dir):
 
 if __name__ == "__main__":
     AGGREGATE_RESULTS = True  # True: 통합 결과, False: 폴더별 결과
-    base_data_dir = "data/ver014_20205215_basic_test"  # 여러 이벤트 폴더가 있는 최상위 디렉토리
+    base_data_dir = "data/ver014_20250218_colregs_test"  # 여러 이벤트 폴더가 있는 최상위 디렉토리
     analyzer = EventAnalyzer()
     main(AGGREGATE_RESULTS, base_data_dir)

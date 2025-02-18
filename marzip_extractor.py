@@ -8,12 +8,12 @@ import json
 class MarzipExtractor:
     def __init__(self, marzip_file=None):
         self.static_dataset = []
-        self.timeSeries = []
+        self.timeseries_dataset = []
         self.simulation_result = []
 
         self.base_route = []
         self.own_ship_static = []
-        self.sils_events = []
+        self.events = []
 
         if marzip_file is not None:
             self.marzip = marzip_file
@@ -24,9 +24,10 @@ class MarzipExtractor:
             marzip = self.marzip
             
         data = self.extract_and_read_marzip(marzip)
-        self.simulation_result = data["simulation_result"]
+
         self.static_dataset = data["static_dataset"]
         self.timeseries_dataset = data["timeseries_dataset"]
+        self.simulation_result = data["simulation_result"]
 
         self.base_route = self.extract_base_route(self.simulation_result)
         self.own_ship_static = self.extract_own_ship_static_info(self.simulation_result)

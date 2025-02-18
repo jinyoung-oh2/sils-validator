@@ -119,7 +119,7 @@ class EventPlotter(MarzipExtractor):
             )
             ax.add_patch(ship_polygon)
 
-    def plot_all(self, output_path_pattern):
+    def plot_all(self, output_path_pattern, fail_only = True):
         """
         이벤트별로 플롯을 생성하여 저장합니다.
         
@@ -131,6 +131,24 @@ class EventPlotter(MarzipExtractor):
         num_events = len(events)
         for idx in range(num_events):
             fig, ax = plt.subplots(figsize=(8, 6))
+
+            # 평가 텍스트 출력 (예: safe_path_gen fail, Near target)
+            ca_gen_fail = False
+            if idx < len(events):
+                ca_gen_fail = events[idx].get("ca_path_gen_fail")
+
+                if ca_gen_fail == False and fail_only == True:
+                    continue
+
+                if events[idx].get("ca_path_gen_fail"):
+                    ax.text(0.05, 0.95, "safe_path_gen fail", transform=ax.transAxes,
+                            fontsize=12, color='red', verticalalignment='top',
+                            bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
+                if events[idx].get("is_near_target"):
+                    ax.text(0.95, 0.95, "Near target", transform=ax.transAxes,
+                            fontsize=12, color='blue', verticalalignment='top',
+                            horizontalalignment='right',
+                            bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
             
             # Safe Path 그리기
             route = self.get_safe_path(safe_paths, idx)
@@ -191,18 +209,6 @@ class EventPlotter(MarzipExtractor):
                         except Exception as e:
                             print(f"Warning: Target cog/sog error: {e}, 대상: {target}")
             
-            # 평가 텍스트 출력 (예: safe_path_gen fail, Near target)
-            if idx < len(events):
-                event = events[idx]
-                if event.get("ca_path_gen_fail"):
-                    ax.text(0.05, 0.95, "safe_path_gen fail", transform=ax.transAxes,
-                            fontsize=12, color='red', verticalalignment='top',
-                            bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
-                if event.get("is_near_target"):
-                    ax.text(0.95, 0.95, "Near target", transform=ax.transAxes,
-                            fontsize=12, color='blue', verticalalignment='top',
-                            horizontalalignment='right',
-                            bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
             
             ax.set_xlabel("Longitude")
             ax.set_ylabel("Latitude")
@@ -216,8 +222,8 @@ class EventPlotter(MarzipExtractor):
 
 
 def main():
-    base_data_dir = "data/ver014_20205214_basic_test"           # 원본 데이터가 있는 최상위 폴더
-    base_result_dir = "plot_result/ver014_20205214_basic_test"  # 결과 플롯을 저장할 폴더
+    base_data_dir = "data/ver014_20250218_colregs_test"           # 원본 데이터가 있는 최상위 폴더
+    base_result_dir = "plot_result/ver014_20250218_colregs_test"  # 결과 플롯을 저장할 폴더
 
     # FileInputManager를 사용하여 base_data_dir 내의 모든 마집 파일을 재귀적으로 검색
     file_manager = FileInputManager(base_data_dir)
@@ -247,12 +253,10 @@ def main():
         
         # 출력 파일 패턴: 파일명_event{idx}.png
         output_pattern = os.path.join(output_dir, f"{os.path.basename(result_base)}_event{{}}.png")
-        print(f"\nProcessing: {marzip_file}")
-        print(f"Output pattern: {output_pattern}")
 
         # 마집 파일 하나에 대해 EventPlotter 인스턴스 생성 후 이벤트별 플롯 생성
         plotter = EventPlotter(marzip_file)
-        plotter.plot_all(output_pattern)
+        plotter.plot_all(output_pattern, fail_only = True)
 
     print("\nDONE")
 

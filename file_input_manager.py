@@ -39,6 +39,8 @@ class FileInputManager:
         """
         marzip_files = []
         for root, dirs, files in os.walk(self.file_folder):
+            batch_count = len([f for f in files if f.endswith('.marzip')])
+            print(f"Found {batch_count} .marzip files in {root}")
             for file in files:
                 if file.endswith(".marzip"):
                     marzip_files.append(os.path.join(root, file))
