@@ -123,7 +123,9 @@ class TargetDistribution(MarzipExtractor):
                 "heading": target.get("heading"),
                 "position": target.get("position"),
                 "sog": target.get("sog"),
-                "caPathGenFail": ca_pg_fail
+                "caPathGenFail": ca_pg_fail,
+                "tcpa": target.get("tcpa")
+
             }
             records.append(record)
 
@@ -258,7 +260,7 @@ class TargetDistribution(MarzipExtractor):
             c=target_sog,
             cmap='viridis',
             marker='o', 
-            s=2,
+            s=10,
             alpha=0.8,
             vmin=0,
             vmax=40,
@@ -368,21 +370,13 @@ class TargetDistribution(MarzipExtractor):
             ax.set_ylabel("Latitude")
         
         # 각 그룹별 scatter plot
-        ax.scatter(green_lons, green_lats, color="green", marker='o', s=2, alpha=0.8, label="Path Gen Success")
-        ax.scatter(blue_lons, blue_lats, color="blue", marker='o', s=2, alpha=0.8, label="Path Gen N/A")
+
+        
+        ax.scatter(green_lons, green_lats, color="green", marker='o', s=10, alpha=0.8, label="Path Gen Success")
+        ax.scatter(blue_lons, blue_lats, color="blue", marker='o', s=10, alpha=0.8, label="Path Gen N/A")
         
         # Fail(경로 생성 실패) 케이스: 빨간색 scatter와 함께, SOG와 Heading 정보를 이용한 화살표 표기
-        ax.scatter(red_lons, red_lats, color="red", marker='o', s=2, alpha=0.8, label="Path Gen Fail")
-        
-        # # red 그룹에 대해 화살표(heading, sog) 추가
-        # if red_lats and red_lons:
-        #     # red_headings가 degrees로 되어 있다고 가정하고 radians로 변환
-        #     red_headings_rad = [math.radians(h) for h in red_headings]
-        #     # 화살표 길이를 조절할 스케일 (필요에 따라 조정)
-        #     arrow_scale = 0.05
-        #     red_u = [arrow_scale * sog * math.sin(h) for sog, h in zip(red_sogs, red_headings_rad)]
-        #     red_v = [arrow_scale * sog * math.cos(h) for sog, h in zip(red_sogs, red_headings_rad)]
-        #     ax.quiver(red_lons, red_lats, red_u, red_v, angles='xy', scale_units='xy', scale=1, color='black', alpha=0.8)
+        ax.scatter(red_lons, red_lats, color="red", marker='o', s=10, alpha=0.8, label="Path Gen Fail")
         
         if convert_to_nm:
             ax.plot(0, 0, 'r*', markersize=15, label='Own Ship (Reference)')
@@ -416,16 +410,118 @@ class TargetDistribution(MarzipExtractor):
         plt.close()
         print(f"플롯이 {output_file}에 저장되었습니다.")
 
+    def plot_event_distribution_by_tcpa(self, output_file, convert_to_nm=True):
+        """
+        수집된 이벤트 타겟 데이터를 기반으로 tcpa 값에 따라 색상이 달라지는 플롯 생성  
+        - tcpa 값이 낮을수록 (빠른 충돌 위험) 다른 색상으로 표시됩니다.
+        """
+        aggregated_targets = self.all_event_targets
+        if not aggregated_targets:
+            print("TCPA Target Distribution: 타겟 데이터가 없습니다.")
+            return
+
+        if not (self.first_extractor and self.first_extractor.events):
+            print("own_ship 데이터가 없습니다.")
+            return
+
+        first_event = self.first_extractor.events[0]
+        own_ship_event = first_event.get("own_ship_event")
+        if not (own_ship_event and "position" in own_ship_event):
+            print("own_ship 위치 데이터가 없습니다.")
+            return
+
+        ship_lat = own_ship_event["position"].get("latitude")
+        ship_lon = own_ship_event["position"].get("longitude")
+        if ship_lat is None or ship_lon is None:
+            print("own_ship 위치 데이터가 불완전합니다.")
+            return
+
+        # tcpa 값과 좌표를 저장할 리스트 생성
+        lats, lons, tcpa_values = [], [], []
+        for rec in aggregated_targets:
+            pos = rec.get("position")
+            if not (pos and "latitude" in pos and "longitude" in pos):
+                continue
+            lat = pos.get("latitude")
+            lon = pos.get("longitude")
+            tcpa = rec.get("tcpa")
+            if tcpa is None:
+                continue  # tcpa 값이 없는 경우는 건너뜁니다.
+            lats.append(lat)
+            lons.append(lon)
+            try:
+                tcpa_values.append(float(tcpa))
+            except Exception as e:
+                print(f"tcpa 변환 오류: {e}")
+                tcpa_values.append(0)
+
+        if not lats or not lons or not tcpa_values:
+            print("tcpa 데이터를 포함한 타겟이 없습니다.")
+            return
+
+        fig, ax = plt.subplots(figsize=(12, 10))
+        
+        if convert_to_nm:
+            ship_lat_rad = math.radians(ship_lat)
+            lats = [(lat - ship_lat) * 60 for lat in lats]
+            lons = [(lon - ship_lon) * 60 * math.cos(ship_lat_rad) for lon in lons]
+            ax.set_xlabel("Longitude Offset (NM)")
+            ax.set_ylabel("Latitude Offset (NM)")
+        else:
+            ax.set_xlabel("Longitude")
+            ax.set_ylabel("Latitude")
+        
+        # scatter plot: tcpa 값에 따라 색상 지정 (연속형 컬러맵 사용)
+        sc = ax.scatter(lons, lats, c=tcpa_values, cmap="viridis", marker='o', s=10, alpha=0.8)
+        cbar = plt.colorbar(sc, ax=ax)
+        cbar.set_label("TCPA Value")
+        
+        # own_ship 위치 표시 (참조점)
+        if convert_to_nm:
+            ax.plot(0, 0, 'r*', markersize=15, label='Own Ship (Reference)')
+        else:
+            ax.plot(ship_lon, ship_lat, 'r*', markersize=15, label='Own Ship (Reference)')
+        
+        # Base Route 그리기 (있을 경우)
+        if self.first_extractor.base_route:
+            base_lat = []
+            base_lon = []
+            if convert_to_nm:
+                ship_lat_rad = math.radians(ship_lat)
+                for point in self.first_extractor.base_route:
+                    if "position" in point:
+                        base_lat.append((point["position"]["latitude"] - ship_lat) * 60)
+                        base_lon.append((point["position"]["longitude"] - ship_lon) * 60 * math.cos(ship_lat_rad))
+            else:
+                base_lat = [point["position"]["latitude"] for point in self.first_extractor.base_route if "position" in point]
+                base_lon = [point["position"]["longitude"] for point in self.first_extractor.base_route if "position" in point]
+            try:
+                if base_lat and base_lon:
+                    ax.plot(base_lon, base_lat, marker='o', linestyle='-', color='black', label='Base Route')
+            except Exception as e:
+                print(f"Base Route 그리기 실패: {e}")
+        else:
+            print("Base Route 데이터가 없습니다.")
+
+        ax.set_title("Event Target Distribution by TCPA")
+        ax.legend()
+        ax.grid(True)
+        plt.tight_layout()
+        plt.savefig(output_file)
+        plt.close()
+        print(f"TCPA 기반 타겟 분포 플롯이 {output_file}에 저장되었습니다.")
+
 
 def main():
-    base_data_dir = "data/ver014_20250218_colregs_test"
-    output_dir = "plot_result/ver014_20250218_colregs_test"
+    base_data_dir = "data/ver014_20250218_colregs_test-2"
+    output_dir = "plot_result/ver014_20250218_colregs_test-2"
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
     # 출력 파일명 지정
     output_file_initial = os.path.join(output_dir, "initial_target_distribution.png")
     output_file_event   = os.path.join(output_dir, "event_target_distribution.png")
+    output_file_event   = os.path.join(output_dir, "event_target_distribution_by_tcpa.png")
 
     # 공통 옵션 변수 정의
     sample_fraction = 1
@@ -448,6 +544,8 @@ def main():
     aggregator.plot_initial_distribution(output_file_initial, convert_to_nm=True)
     # 이벤트 타겟 플롯 생성 (caPathGenFail 값에 따라 빨간색/초록색)
     aggregator.plot_event_distribution(output_file_event, convert_to_nm=True)
+    # TCPA에 따라 플롯 생성
+    aggregator.plot_event_distribution_by_tcpa(output_file_event, convert_to_nm=True)
 
 if __name__ == "__main__":
     main()

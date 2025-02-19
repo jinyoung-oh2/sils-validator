@@ -14,6 +14,7 @@ class MarzipExtractor:
         self.base_route = []
         self.own_ship_static = []
         self.events = []
+        self.colreg = []
 
         if marzip_file is not None:
             self.marzip = marzip_file
