@@ -123,7 +123,7 @@ class EventPlotter(MarzipExtractor):
         """
         이벤트별로 플롯을 생성하여 저장합니다.
         
-        :param output_path_pattern: 저장 경로 패턴 (예: "plot_result/event_{}_plot.png")
+        :param output_path_pattern: 저장 경로 패턴 (예: "result/event_{}_plot.png")
                                     {}에 이벤트 인덱스가 들어갑니다.
         """
         events = self.events if self.events else []
@@ -223,7 +223,7 @@ class EventPlotter(MarzipExtractor):
 
 def main():
     base_data_dir = "data/ver014_20250218_colregs_test"           # 원본 데이터가 있는 최상위 폴더
-    base_result_dir = "plot_result/ver014_20250218_colregs_test"  # 결과 플롯을 저장할 폴더
+    base_result_dir = "result/ver014_20250218_colregs_test"  # 결과 플롯을 저장할 폴더
 
     # FileInputManager를 사용하여 base_data_dir 내의 모든 마집 파일을 재귀적으로 검색
     file_manager = FileInputManager(base_data_dir)

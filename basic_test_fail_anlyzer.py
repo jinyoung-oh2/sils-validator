@@ -4,6 +4,8 @@ import concurrent.futures
 import matplotlib.pyplot as plt
 from marzip_extractor import MarzipExtractor
 from file_input_manager import FileInputManager
+import shutil
+
 
 class BasicTestFailAnalyzer(MarzipExtractor):
     """
@@ -151,10 +153,11 @@ class BasicTestFailAnalysisRunner:
 
     def run_and_save(self):
         results = self.run_all_parallel()
-        common_result_dir = "analysis_result"
+        # 기본 경로(self.event_folder)와 결과 디렉토리를 조인
+        common_result_dir = os.path.join(self.event_folder, "result")
         if not os.path.exists(common_result_dir):
             os.makedirs(common_result_dir)
-        output_csv = os.path.join(common_result_dir, "all_event_analysis.csv")
+        output_csv = os.path.join(self.event_folder, "all_event_analysis.csv")
         
         # 각 결과의 상태별 카운트
         count_success = sum(1 for r in results if r["Result"].lower() == "success")
@@ -233,7 +236,7 @@ class BasicTestFailAnalysisRunner:
             print("히스토그램에 표시할 Failed SOG 데이터가 없습니다.")
 
 def main():
-    base_data_dir = "data/ver014_20250218_colregs_test-2"  # 여러 이벤트 폴더가 있는 최상위 디렉토리
+    base_data_dir = "data/ver014_20250219_colregs_test"  # 여러 이벤트 폴더가 있는 최상위 디렉토리
     runner = BasicTestFailAnalysisRunner(base_data_dir)
     runner.run_and_save()
     print("DONE")

@@ -513,15 +513,15 @@ class TargetDistribution(MarzipExtractor):
 
 
 def main():
-    base_data_dir = "data/ver014_20250218_colregs_test-2"
-    output_dir = "plot_result/ver014_20250218_colregs_test-2"
+    base_data_dir = "data/ver014_20250219_colregs_test"
+    output_dir = "result/ver014_20250219_colregs_test"
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
     # 출력 파일명 지정
     output_file_initial = os.path.join(output_dir, "initial_target_distribution.png")
     output_file_event   = os.path.join(output_dir, "event_target_distribution.png")
-    output_file_event   = os.path.join(output_dir, "event_target_distribution_by_tcpa.png")
+    output_file_event_tcpa   = os.path.join(output_dir, "event_target_distribution_by_tcpa.png")
 
     # 공통 옵션 변수 정의
     sample_fraction = 1
@@ -545,7 +545,7 @@ def main():
     # 이벤트 타겟 플롯 생성 (caPathGenFail 값에 따라 빨간색/초록색)
     aggregator.plot_event_distribution(output_file_event, convert_to_nm=True)
     # TCPA에 따라 플롯 생성
-    aggregator.plot_event_distribution_by_tcpa(output_file_event, convert_to_nm=True)
+    aggregator.plot_event_distribution_by_tcpa(output_file_event_tcpa, convert_to_nm=True)
 
 if __name__ == "__main__":
     main()

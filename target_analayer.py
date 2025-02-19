@@ -217,8 +217,8 @@ class BasicTestFailAnalyzerWithExtendedPlot(BasicTestFailAnalyzer):
 
 
 def main():
-    base_data_dir = "data/ver014_20250218_colregs_test-2"
-    out_dir = "plot_result/ver014_20250218_colregs_test-2"
+    base_data_dir = "data/ver014_20250219_colregs_test"
+    out_dir = "result/ver014_20250219_colregs_test"
 
     plotter = BasicTestFailAnalyzerWithExtendedPlot(base_data_dir)
     plotter.run_and_save(out_dir)
