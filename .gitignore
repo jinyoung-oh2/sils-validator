@@ -2,3 +2,5 @@ analysis_result/
 __pycache__/
 data/
 result/
+timeseries/
+analyzer/

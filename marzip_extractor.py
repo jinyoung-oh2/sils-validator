@@ -9,6 +9,7 @@ class MarzipExtractor:
     def __init__(self, marzip_file=None):
         self.static_dataset = []
         self.timeseries_dataset = []
+        self.own_ship_time_series = []  # ownShip이 True인 timeseries 데이터 저장
         self.simulation_result = []
 
         self.base_route = []
@@ -19,7 +20,6 @@ class MarzipExtractor:
         if marzip_file is not None:
             self.marzip = marzip_file
 
-
     def run(self, marzip=None):
         if marzip is None:
             marzip = self.marzip
@@ -28,6 +28,7 @@ class MarzipExtractor:
 
         self.static_dataset = data["static_dataset"]
         self.timeseries_dataset = data["timeseries_dataset"]
+        self.own_ship_time_series = data["own_ship_time_series"]
         self.simulation_result = data["simulation_result"]
 
         self.base_route = self.extract_base_route(self.simulation_result)
@@ -47,7 +48,6 @@ class MarzipExtractor:
         else:
             return [item]
         
-
     def safe_get(self, data, keys, default=None):
         """
         중첩 딕셔너리에서 키 체인을 따라 안전하게 값을 가져옵니다.
@@ -60,7 +60,6 @@ class MarzipExtractor:
             else:
                 return default
         return data
-
 
     def extract_base_route(self, data):
         """
@@ -97,8 +96,6 @@ class MarzipExtractor:
                 event_info["is_near_target"] = self.safe_get(event, ["isNearTarget"])
                 events.append(event_info)
         return events
-
-
 
     def _read_arrow_file(self, file_path):
         """
@@ -175,6 +172,7 @@ class MarzipExtractor:
         :return: dict
             {
                 "timeseries_dataset": [...],
+                "own_ship_time_series": [...],
                 "static_dataset": [...],
                 "simulation_result": { ... }
             }
@@ -185,7 +183,6 @@ class MarzipExtractor:
         # 파일이 ZIP 형식인지 확인
         if zipfile.is_zipfile(marzip):
             with zipfile.ZipFile(marzip, 'r') as zip_ref:
-                # .marzip 확장자를 제거한 디렉토리명을 사용합니다.
                 extract_dir = os.path.splitext(marzip)[0]
                 zip_ref.extractall(extract_dir)
                 extracted_files = [os.path.join(extract_dir, name) for name in zip_ref.namelist()]
@@ -193,6 +190,7 @@ class MarzipExtractor:
             raise ValueError("제공된 파일은 올바른 .marzip 아카이브가 아닙니다.")
 
         timeseries_dataset = []
+        own_ship_time_series = []
         static_dataset = []
         simulation_result = []
 
@@ -201,8 +199,12 @@ class MarzipExtractor:
             if file.endswith('timeseries.arrow'):
                 try:
                     table = self._read_arrow_file(file)
-                    # to_pylist()로 각 row를 dict로 변환하여 리스트에 추가
-                    timeseries_dataset.extend(table.to_pylist())
+                    for row in table.to_pylist():
+                        # "ownShip" 값이 True이면 own_ship_time_series에, 그렇지 않으면 timeseries_dataset에 추가
+                        if row.get("ownShip", False):
+                            own_ship_time_series.append(row)
+                        else:
+                            timeseries_dataset.append(row)
                 except Exception as e:
                     print(f"파일 {file} 읽기 오류: {e}")
             elif file.endswith('static.arrow'):
@@ -218,7 +220,6 @@ class MarzipExtractor:
                 except Exception as e:
                     print(f"JSON 파일 {file} 읽기 오류: {e}")
 
-        # 압축 해제한 디렉토리 삭제
         if extract_dir and os.path.exists(extract_dir):
             try:
                 shutil.rmtree(extract_dir)
@@ -227,6 +228,7 @@ class MarzipExtractor:
 
         return {
             "timeseries_dataset": timeseries_dataset,
+            "own_ship_time_series": own_ship_time_series,
             "static_dataset": static_dataset,
             "simulation_result": simulation_result
         }
