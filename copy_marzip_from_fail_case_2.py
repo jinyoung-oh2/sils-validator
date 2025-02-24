@@ -59,12 +59,12 @@ def main():
     )
     parser.add_argument(
         "--base", 
-        default="data/ver014_20250220_colregs_test_5", 
+        default="/media/avikus/One Touch/HinasControlSilsCA/CA_v0.1.4_data/SiLS_sever1/Random_Testing/20250221_1/output", 
         help="marzip 파일들이 포함된 상위 경로 (기본: data/ver014_20250220_colregs_test_3)"
     )
     parser.add_argument(
         "--log", 
-        default="analyzer/ver014_20250220_colregs_test_5/analysis_log.txt", 
+        default="analyze/20250221_1/analysis_log.txt", 
         help=("로그 파일 경로. 절대 경로일 수도 있고, 현재 작업 디렉토리 기준의 상대 경로일 수도 있습니다. "
               "예를 들어, analyzer/ver014_20250220_colregs_test_4/analysis_log.txt처럼 base 경로와 다른 위치에 있다면 해당 경로를 그대로 입력하세요.")
     )
@@ -72,7 +72,7 @@ def main():
         "--keywords", 
         nargs="+", 
         # default=["Result=FAIL", "Result=NA (NA-Collision=1)"],
-        default=["events=2"],
+        default=["Result=FAIL"],
         help="검색할 키워드 리스트 (여러 개 입력 가능). 'Collision=1' 입력시 NA-Collision=1는 제외됩니다."
     )
     

@@ -102,7 +102,7 @@ def project_point_onto_polyline(px, py, xs, ys):
 ################################
 class SimpulatePlotter(MarzipExtractor):
     COLLISION_DIST = 0.5 + (250 / 1852)
-    SIM_DURATION_SEC = 3 * 60 * 60  # 실제 3시간 = 10800초
+    SIM_DURATION_SEC = 4 * 60 * 60  # 실제 3시간 = 10800초
     TIME_STEP_SEC = 5            # 5초 간격
 
     def __init__(self, marzip_file):
@@ -297,7 +297,7 @@ class SimpulatePlotter(MarzipExtractor):
 
     def set_axis_limits_ownship(self, ax):
         ax.set_xlim(-20, 20)
-        ax.set_ylim(-20, 20)
+        ax.set_ylim(-20, 40)
         ax.set_aspect('equal')
 
     def plot_collision_event(self, sim_res, out_file):
@@ -406,8 +406,8 @@ class SimpulatePlotter(MarzipExtractor):
 # 메인
 ###############################################
 def main():
-    base_data_dir = "/media/avikus/One Touch/HinasControlSilsCA/CA_v0.1.4_data/SiLS_sever1/Random_Testing/20250221_1/output"
-    base_result_dir = "analyze/20250221_1"
+    base_data_dir = "/media/avikus/One Touch/HinasControlSilsCA/CA_v0.1.4_data/SiLS_sever2/Random_Testing/20250221_1/output"
+    base_result_dir = "analyze/Server2"
 
     file_mgr = FileInputManager(base_data_dir)
     marzip_files = file_mgr.get_all_marzip_files()
@@ -530,7 +530,7 @@ def main():
                 grand_na_collision += local_na_coll
                 grand_collision += local_coll
                 grand_no_collision += local_no_coll
-                
+
         except Exception as e:
             print(f"[ERROR] 파일 처리 중 오류: {marzip_file}, {e}")
             with open(analysis_log_path, "a", encoding="utf-8") as f:

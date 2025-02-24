@@ -244,8 +244,6 @@ class MarzipExtractor:
                 try:
                     with open(file, 'r', encoding='utf-8') as json_file:
                         simulation_result = json.load(json_file)
-                    # 첫 번째 JSON 파일만 사용하고 종료
-                    break
                 except Exception as e:
                     print(Fore.RED + f"JSON 파일 읽기 오류: {file} / {e}" + Style.RESET_ALL)
 
