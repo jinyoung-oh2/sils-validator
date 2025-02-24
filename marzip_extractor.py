@@ -4,6 +4,8 @@ import shutil
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import json
+from colorama import Fore, Style
+
 
 class MarzipExtractor:
     def __init__(self, marzip_file=None):
@@ -23,17 +25,36 @@ class MarzipExtractor:
     def run(self, marzip=None):
         if marzip is None:
             marzip = self.marzip
-            
+
         data = self.extract_and_read_marzip(marzip)
 
-        self.static_dataset = data["static_dataset"]
-        self.timeseries_dataset = data["timeseries_dataset"]
-        self.own_ship_time_series = data["own_ship_time_series"]
-        self.simulation_result = data["simulation_result"]
+        # 각 데이터에 대해 기본값 추가
+        self.static_dataset = data.get("static_dataset", [])
+        self.timeseries_dataset = data.get("timeseries_dataset", [])
+        self.own_ship_time_series = data.get("own_ship_time_series", [])
+        self.simulation_result = data.get("simulation_result", {})
 
-        self.base_route = self.extract_base_route(self.simulation_result)
-        self.own_ship_static = self.extract_own_ship_static_info(self.simulation_result)
-        self.events = self.extract_events_info(self.simulation_result)
+        if not self.simulation_result:
+            print(" simulation_result가 비어있습니다. 기본 경로 및 이벤트 추출을 건너뜁니다.")
+            return
+
+        try:
+            self.base_route = self.extract_base_route(self.simulation_result)
+        except Exception as e:
+            print(f" base_route 추출 실패: {e}")
+            self.base_route = None
+
+        try:
+            self.own_ship_static = self.extract_own_ship_static_info(self.simulation_result)
+        except Exception as e:
+            print(f" own_ship_static 추출 실패: {e}")
+            self.own_ship_static = None
+
+        try:
+            self.events = self.extract_events_info(self.simulation_result)
+        except Exception as e:
+            print(f" events 추출 실패: {e}")
+            self.events = []
 
     def flatten(self, item):
         """
@@ -99,22 +120,23 @@ class MarzipExtractor:
     
 
     def _read_arrow_file(self, file_path):
-        """
-        주어진 Arrow 파일을 읽어 pyarrow Table로 반환.
-        IPC File Format이 실패하면 Streaming Format으로 읽음.
-        """
-        with open(file_path, 'rb') as f:
-            try:
-                reader = ipc.RecordBatchFileReader(f)
-                return reader.read_all()
-            except pa.lib.ArrowInvalid:
-                # 파일 포인터 재설정 후 스트리밍 포맷 시도
-                f.seek(0)
+        try:
+            with open(file_path, 'rb') as f:
                 try:
-                    reader = ipc.RecordBatchStreamReader(f)
+                    reader = ipc.RecordBatchFileReader(f)
                     return reader.read_all()
-                except pa.lib.ArrowInvalid as e:
-                    raise e
+                except pa.lib.ArrowInvalid:
+                    f.seek(0)
+                    try:
+                        reader = ipc.RecordBatchStreamReader(f)
+                        return reader.read_all()
+                    except pa.lib.ArrowInvalid as e:
+                        print(f"[ERROR] Streaming format 실패: {file_path}, {e}")
+                        return None
+        except Exception as e:
+            print(f"[ERROR] 파일 열기 실패: {file_path}, {e}")
+            return None
+
 
     def extract_and_save_simulation_result(self):
         """
@@ -169,7 +191,7 @@ class MarzipExtractor:
         .marzip 파일을 압축해제하여 각 파일의 데이터를 읽은 후,
         timeseries 및 static 데이터셋을 반환한다.
         또한 result.json 파일의 내용은 simulation_result에 저장한다.
-        
+
         :return: dict
             {
                 "timeseries_dataset": [...],
@@ -181,19 +203,24 @@ class MarzipExtractor:
         extracted_files = []
         extract_dir = None
 
-        # 파일이 ZIP 형식인지 확인
-        if zipfile.is_zipfile(marzip):
-            with zipfile.ZipFile(marzip, 'r') as zip_ref:
-                extract_dir = os.path.splitext(marzip)[0]
-                zip_ref.extractall(extract_dir)
-                extracted_files = [os.path.join(extract_dir, name) for name in zip_ref.namelist()]
-        else:
-            raise ValueError("제공된 파일은 올바른 .marzip 아카이브가 아닙니다.")
+        # ZIP 압축 해제 처리
+        try:
+            if zipfile.is_zipfile(marzip):
+                with zipfile.ZipFile(marzip, 'r') as zip_ref:
+                    extract_dir = os.path.splitext(marzip)[0]
+                    zip_ref.extractall(extract_dir)
+                    extracted_files = [os.path.join(extract_dir, name) for name in zip_ref.namelist()]
+            else:
+                print(Fore.RED + f"제공된 파일은 올바른 .marzip 아카이브가 아닙니다: {marzip}" + Style.RESET_ALL)
+                return {}
+        except Exception as e:
+            print(Fore.RED + f"압축 해제 실패: {marzip} / {e}" + Style.RESET_ALL)
+            return {}
 
         timeseries_dataset = []
         own_ship_time_series = []
         static_dataset = []
-        simulation_result = []
+        simulation_result = {}
 
         # 압축 해제된 파일들을 순회하며 데이터 읽기
         for file in extracted_files:
@@ -201,31 +228,33 @@ class MarzipExtractor:
                 try:
                     table = self._read_arrow_file(file)
                     for row in table.to_pylist():
-                        # "ownShip" 값이 True이면 own_ship_time_series에, 그렇지 않으면 timeseries_dataset에 추가
                         if row.get("ownShip", False):
                             own_ship_time_series.append(row)
                         else:
                             timeseries_dataset.append(row)
                 except Exception as e:
-                    print(f"파일 {file} 읽기 오류: {e}")
+                    print(Fore.RED + f"파일 읽기 오류: {file} / {e}" + Style.RESET_ALL)
             elif file.endswith('static.arrow'):
                 try:
                     table = self._read_arrow_file(file)
                     static_dataset.extend(table.to_pylist())
                 except Exception as e:
-                    print(f"파일 {file} 읽기 오류: {e}")
+                    print(Fore.RED + f"파일 읽기 오류: {file} / {e}" + Style.RESET_ALL)
             elif file.endswith('.json'):
                 try:
                     with open(file, 'r', encoding='utf-8') as json_file:
                         simulation_result = json.load(json_file)
+                    # 첫 번째 JSON 파일만 사용하고 종료
+                    break
                 except Exception as e:
-                    print(f"JSON 파일 {file} 읽기 오류: {e}")
+                    print(Fore.RED + f"JSON 파일 읽기 오류: {file} / {e}" + Style.RESET_ALL)
 
+        # 추출된 디렉토리 삭제
         if extract_dir and os.path.exists(extract_dir):
             try:
                 shutil.rmtree(extract_dir)
             except Exception as e:
-                print(f"추출된 디렉토리 삭제 실패: {e}")
+                print(Fore.RED + f"추출된 디렉토리 삭제 실패: {extract_dir} / {e}" + Style.RESET_ALL)
 
         return {
             "timeseries_dataset": timeseries_dataset,

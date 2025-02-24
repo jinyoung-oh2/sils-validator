@@ -4,3 +4,5 @@ data/
 result/
 timeseries/
 analyzer/
+analyze/
+venv/

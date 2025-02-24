@@ -406,8 +406,8 @@ class SimpulatePlotter(MarzipExtractor):
 # 메인
 ###############################################
 def main():
-    base_data_dir = "data/ver014_20250220_colregs_test_5"
-    base_result_dir = "analyzer/ver014_20250220_colregs_test_5"
+    base_data_dir = "/media/avikus/One Touch/HinasControlSilsCA/CA_v0.1.4_data/SiLS_sever1/Random_Testing/20250221_1/output"
+    base_result_dir = "analyze/20250221_1"
 
     file_mgr = FileInputManager(base_data_dir)
     marzip_files = file_mgr.get_all_marzip_files()
@@ -440,95 +440,101 @@ def main():
     total_success_files = 0
 
     for marzip_file in marzip_files:
-        grand_file_count += 1
-        plotter = SimpulatePlotter(marzip_file)
-        events_count = len(plotter.events)
+        try:
+            grand_file_count += 1
+            plotter = SimpulatePlotter(marzip_file)
+            events_count = len(plotter.events)
 
-        # 파일 단위 결과
-        local_na_safe = 0
-        local_na_no_path = 0
-        local_na_coll = 0
-        local_coll = 0
-        local_no_coll = 0
+            # 파일 단위 결과
+            local_na_safe = 0
+            local_na_no_path = 0
+            local_na_coll = 0
+            local_coll = 0
+            local_no_coll = 0
 
-        # <신규> 파일별 타겟 감지
-        local_detection_count = 0
+            # <신규> 파일별 타겟 감지
+            local_detection_count = 0
 
-        if events_count == 0:
-            grand_na_safe_target += 1
-            total_na_files += 1  # NA 파일로 분류
-            msg = f"[FOLDER_LOG] {marzip_file} => 0 events => Result=NA (NA-SafeTarget), detectionTargets=0\n"
-            print(msg, end="")
-            with open(analysis_log_path, "a", encoding="utf-8") as f:
-                f.write(msg)
-            continue
-        else:
-            for e_idx in range(events_count):
-                e_data = plotter.events[e_idx]
-                tg_raw = e_data.get("target_ships", [])
-                tg_flat = plotter.flatten(tg_raw)
-                local_detection_count += len(tg_flat)
-
-                sim_res = plotter.simulate_event(e_idx)
-                tag = sim_res.result_tag
-
-                if tag == "NA - Safe Target":
-                    local_na_safe += 1
-                elif tag == "NA - No Path":
-                    local_na_no_path += 1
-                elif tag == "NA Collision":
-                    local_na_coll += 1
-                    if PLOT_OPTION == "na_collision":
-                        rel_path = os.path.relpath(marzip_file, base_data_dir)
-                        result_subdir = os.path.join(base_result_dir, os.path.dirname(rel_path))
-                        if not os.path.exists(result_subdir):
-                            os.makedirs(result_subdir)
-                        out_file = os.path.join(result_subdir, f"{os.path.splitext(os.path.basename(marzip_file))[0]}_ev{e_idx}_NAcoll.png")
-                        plotter.plot_collision_event(sim_res, out_file)
-                elif tag == "Collision":
-                    local_coll += 1
-                    if PLOT_OPTION == "collision":
-                        rel_path = os.path.relpath(marzip_file, base_data_dir)
-                        result_subdir = os.path.join(base_result_dir, os.path.dirname(rel_path))
-                        if not os.path.exists(result_subdir):
-                            os.makedirs(result_subdir)
-                        out_file = os.path.join(result_subdir, f"{os.path.splitext(os.path.basename(marzip_file))[0]}_ev{e_idx}_Collision.png")
-                        plotter.plot_collision_event(sim_res, out_file)
-                elif tag == "No Collision":
-                    local_no_coll += 1
-
-            msg = (
-                f"[FOLDER_LOG] {marzip_file} => events={events_count}, "
-                f"NA-SafeTarget={local_na_safe}, NA-NoPath={local_na_no_path}, "
-                f"NA-Collision={local_na_coll}, Collision={local_coll}, "
-                f"NoCollision={local_no_coll}, detectionTargets={local_detection_count} => "
-            )
-            if local_coll > 0:
-                file_result = "FAIL"
-                total_fail_files += 1
-            elif (local_na_safe > 0 or local_na_no_path > 0 or local_na_coll > 0):
-                na_details = []
-                if local_na_safe > 0:
-                    na_details.append(f"NA-SafeTarget={local_na_safe}")
-                if local_na_no_path > 0:
-                    na_details.append(f"NA-NoPath={local_na_no_path}")
-                if local_na_coll > 0:
-                    na_details.append(f"NA-Collision={local_na_coll}")
-                file_result = f"NA ({', '.join(na_details)})"
-                total_na_files += 1
+            if events_count == 0:
+                grand_na_safe_target += 1
+                total_na_files += 1  # NA 파일로 분류
+                msg = f"[FOLDER_LOG] {marzip_file} => 0 events => Result=NA (NA-SafeTarget), detectionTargets=0\n"
+                print(msg, end="")
+                with open(analysis_log_path, "a", encoding="utf-8") as f:
+                    f.write(msg)
+                continue
             else:
-                file_result = "SUCCESS"
-                total_success_files += 1
-            msg += f"Result={file_result}\n"
-            print(msg, end="")
-            with open(analysis_log_path, "a", encoding="utf-8") as f:
-                f.write(msg)
+                for e_idx in range(events_count):
+                    e_data = plotter.events[e_idx]
+                    tg_raw = e_data.get("target_ships", [])
+                    tg_flat = plotter.flatten(tg_raw)
+                    local_detection_count += len(tg_flat)
 
-            grand_na_safe_target += local_na_safe
-            grand_na_no_path += local_na_no_path
-            grand_na_collision += local_na_coll
-            grand_collision += local_coll
-            grand_no_collision += local_no_coll
+                    sim_res = plotter.simulate_event(e_idx)
+                    tag = sim_res.result_tag
+
+                    if tag == "NA - Safe Target":
+                        local_na_safe += 1
+                    elif tag == "NA - No Path":
+                        local_na_no_path += 1
+                    elif tag == "NA Collision":
+                        local_na_coll += 1
+                        if PLOT_OPTION == "na_collision":
+                            rel_path = os.path.relpath(marzip_file, base_data_dir)
+                            result_subdir = os.path.join(base_result_dir, os.path.dirname(rel_path))
+                            if not os.path.exists(result_subdir):
+                                os.makedirs(result_subdir)
+                            out_file = os.path.join(result_subdir, f"{os.path.splitext(os.path.basename(marzip_file))[0]}_ev{e_idx}_NAcoll.png")
+                            plotter.plot_collision_event(sim_res, out_file)
+                    elif tag == "Collision":
+                        local_coll += 1
+                        if PLOT_OPTION == "collision":
+                            rel_path = os.path.relpath(marzip_file, base_data_dir)
+                            result_subdir = os.path.join(base_result_dir, os.path.dirname(rel_path))
+                            if not os.path.exists(result_subdir):
+                                os.makedirs(result_subdir)
+                            out_file = os.path.join(result_subdir, f"{os.path.splitext(os.path.basename(marzip_file))[0]}_ev{e_idx}_Collision.png")
+                            plotter.plot_collision_event(sim_res, out_file)
+                    elif tag == "No Collision":
+                        local_no_coll += 1
+
+                msg = (
+                    f"[FOLDER_LOG] {marzip_file} => events={events_count}, "
+                    f"NA-SafeTarget={local_na_safe}, NA-NoPath={local_na_no_path}, "
+                    f"NA-Collision={local_na_coll}, Collision={local_coll}, "
+                    f"NoCollision={local_no_coll}, detectionTargets={local_detection_count} => "
+                )
+                if local_coll > 0:
+                    file_result = "FAIL"
+                    total_fail_files += 1
+                elif (local_na_safe > 0 or local_na_no_path > 0 or local_na_coll > 0):
+                    na_details = []
+                    if local_na_safe > 0:
+                        na_details.append(f"NA-SafeTarget={local_na_safe}")
+                    if local_na_no_path > 0:
+                        na_details.append(f"NA-NoPath={local_na_no_path}")
+                    if local_na_coll > 0:
+                        na_details.append(f"NA-Collision={local_na_coll}")
+                    file_result = f"NA ({', '.join(na_details)})"
+                    total_na_files += 1
+                else:
+                    file_result = "SUCCESS"
+                    total_success_files += 1
+                msg += f"Result={file_result}\n"
+                print(msg, end="")
+                with open(analysis_log_path, "a", encoding="utf-8") as f:
+                    f.write(msg)
+
+                grand_na_safe_target += local_na_safe
+                grand_na_no_path += local_na_no_path
+                grand_na_collision += local_na_coll
+                grand_collision += local_coll
+                grand_no_collision += local_no_coll
+                
+        except Exception as e:
+            print(f"[ERROR] 파일 처리 중 오류: {marzip_file}, {e}")
+            with open(analysis_log_path, "a", encoding="utf-8") as f:
+                f.write(f"[ERROR] {marzip_file} 처리 중 예외 발생: {e}\n")
 
     total_fail = grand_collision + grand_na_collision
     total_na = grand_na_safe_target + grand_na_no_path + grand_na_collision
