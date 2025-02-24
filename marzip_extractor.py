@@ -96,6 +96,7 @@ class MarzipExtractor:
                 event_info["is_near_target"] = self.safe_get(event, ["isNearTarget"])
                 events.append(event_info)
         return events
+    
 
     def _read_arrow_file(self, file_path):
         """

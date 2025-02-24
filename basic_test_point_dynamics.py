@@ -406,8 +406,8 @@ class SimpulatePlotter(MarzipExtractor):
 # 메인
 ###############################################
 def main():
-    base_data_dir = "data/ver014_20250220_colregs_test_2"
-    base_result_dir = "analyzer/ver014_20250220_colregs_test_2"
+    base_data_dir = "data/ver014_20250220_colregs_test_5"
+    base_result_dir = "analyzer/ver014_20250220_colregs_test_5"
 
     file_mgr = FileInputManager(base_data_dir)
     marzip_files = file_mgr.get_all_marzip_files()

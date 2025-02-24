@@ -98,7 +98,7 @@ class BasicTestFailAnalyzerWithExtendedPlot(BasicTestFailAnalyzer):
         draw_gaussian: True이면 히스토그램 위에 가우시안 피팅 곡선을 겹쳐 그립니다.
         """
         # 사용할 카테고리 (필요에 따라 확장 가능)
-        ordered_categories = ["all", "n/a"]
+        ordered_categories = ["all"]
         categories = [cat for cat in ordered_categories if cat in data_list]
         n_cats = len(categories)
         
@@ -156,6 +156,8 @@ class BasicTestFailAnalyzerWithExtendedPlot(BasicTestFailAnalyzer):
         plt.close()
         print(f"{parameter_name.upper()} 히스토그램이 {output_file}에 저장되었습니다. (Gaussian Fit: {draw_gaussian})")
 
+
+
     def run_and_save(self, out_dir):
         """
         - 모든 마집 파일을 처리(run_all_files)
@@ -190,7 +192,7 @@ class BasicTestFailAnalyzerWithExtendedPlot(BasicTestFailAnalyzer):
                 initial_groups.setdefault(key, []).extend(vals)
         self.plot_histogram_by_classification(
             data_list=initial_groups,
-            parameter_name="sog (initial)",
+            parameter_name="sog",
             output_file=os.path.join(out_dir, "classification_initial_sog_histogram.png")
         )
 
@@ -211,14 +213,14 @@ class BasicTestFailAnalyzerWithExtendedPlot(BasicTestFailAnalyzer):
                     event_groups.setdefault(key, []).extend(vals)
             self.plot_histogram_by_classification(
                 data_list=event_groups,
-                parameter_name=f"event {param}",
+                parameter_name=f"{param}",
                 output_file=os.path.join(out_dir, f"classification_event_{param}_histogram.png")
             )
 
 
 def main():
-    base_data_dir = "data/ver014_20250219_colregs_test"
-    out_dir = "result/ver014_20250219_colregs_test"
+    base_data_dir = "data/ver014_20250220_colregs_test_5"
+    out_dir = "result/ver014_20250220_colregs_test_5"
 
     plotter = BasicTestFailAnalyzerWithExtendedPlot(base_data_dir)
     plotter.run_and_save(out_dir)
