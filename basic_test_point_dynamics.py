@@ -9,11 +9,14 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import re
+import json
 
 from marzip_extractor import MarzipExtractor
 from file_input_manager import FileInputManager
+import faulthandler
+faulthandler.enable()
 
-# 플롯 옵션: "collision", "na_collision", "none"
+# 플롯 옵션: "collision", "na_collision", "none", "ALL"
 PLOT_OPTION = "collision"
 
 ################################
@@ -85,7 +88,7 @@ def project_point_onto_polyline(px, py, xs, ys):
         dy = ys[i] - ys[i-1]
         seg_len = math.sqrt(dx*dx + dy*dy)
         cumdist.append(cumdist[-1] + seg_len)
-        if seg_len==0:
+        if seg_len == 0:
             continue
         t = ((px - xs[i-1]) * dx + (py - ys[i-1]) * dy) / (seg_len**2)
         t = max(0, min(1, t))
@@ -102,7 +105,7 @@ def project_point_onto_polyline(px, py, xs, ys):
 ################################
 class SimpulatePlotter(MarzipExtractor):
     COLLISION_DIST = 0.5 + (250 / 1852)
-    SIM_DURATION_SEC = 4 * 60 * 60  # 실제 3시간 = 10800초
+    SIM_DURATION_SEC = 5 * 60 * 60  # 실제 3시간 = 10800초
     TIME_STEP_SEC = 5            # 5초 간격
 
     def __init__(self, marzip_file):
@@ -120,10 +123,6 @@ class SimpulatePlotter(MarzipExtractor):
         return arr
 
     def simulate_event_with_safe_route(self, event_index, safe_route):
-        """
-        주어진 safe_route(또는 이전 이벤트의 safe_route)를 사용하여 이벤트 시뮬레이션.
-        추가: base_route의 끝에 도달하면 시뮬레이션 종료
-        """
         res = SimulationResult()
         res.event_index = event_index
 
@@ -137,7 +136,12 @@ class SimpulatePlotter(MarzipExtractor):
             res.has_path = False
             return res
 
-        own_sog = float(own_ev["sog"])
+        try:
+            own_sog = float(own_ev["sog"])
+        except Exception as e:
+            print(f"own_sog 변환 실패: {e}")
+            own_sog = 0
+
         start_lat = own_ev["position"]["latitude"]
         start_lon = own_ev["position"]["longitude"]
 
@@ -151,7 +155,6 @@ class SimpulatePlotter(MarzipExtractor):
         start_x = (start_lon - ref_lon) * 60 * cos_factor
         start_y = (start_lat - ref_lat) * 60
 
-        # safe_route 배열 (NM 단위)
         safe_x, safe_y = [], []
         for pt in safe_route:
             la = pt["position"]["latitude"]
@@ -159,7 +162,6 @@ class SimpulatePlotter(MarzipExtractor):
             safe_x.append((lo - ref_lon) * 60 * cos_factor)
             safe_y.append((la - ref_lat) * 60)
 
-        # base_route 배열 (NM 단위)
         base_x, base_y = [], []
         for pt in self.base_route:
             la = pt["position"]["latitude"]
@@ -167,24 +169,17 @@ class SimpulatePlotter(MarzipExtractor):
             base_x.append((lo - ref_lon) * 60 * cos_factor)
             base_y.append((la - ref_lat) * 60)
 
-        total_safe_dist = 0.0
-        for i in range(len(safe_x) - 1):
-            dx = safe_x[i+1] - safe_x[i]
-            dy = safe_y[i+1] - safe_y[i]
-            total_safe_dist += math.sqrt(dx*dx + dy*dy)
-
+        total_safe_dist = sum(math.sqrt((safe_x[i+1]-safe_x[i])**2 + (safe_y[i+1]-safe_y[i])**2) 
+                              for i in range(len(safe_x)-1))
         base_total_dist = 0.0
         if len(base_x) > 1:
-            for i in range(len(base_x) - 1):
-                dx = base_x[i+1] - base_x[i]
-                dy = base_y[i+1] - base_y[i]
-                base_total_dist += math.sqrt(dx*dx + dy*dy)
+            base_total_dist = sum(math.sqrt((base_x[i+1]-base_x[i])**2 + (base_y[i+1]-base_y[i])**2)
+                                  for i in range(len(base_x)-1))
 
         proj_dist = 0.0
         if len(safe_x) > 1:
             proj_dist = project_point_onto_polyline(start_x, start_y, safe_x, safe_y)
 
-        # --- 타겟 정보 추출 (한 번만 수행) ---
         flat_targets = self.flatten(e.get("target_ships", []))
         tgt_info = []
         for t in flat_targets:
@@ -192,16 +187,19 @@ class SimpulatePlotter(MarzipExtractor):
                 continue
             la = t["position"]["latitude"]
             lo = t["position"]["longitude"]
-            sog = float(t.get("sog", 0.0))
-            cog = float(t.get("cog", 0.0))
+            try:
+                sog = float(t.get("sog", 0.0))
+                cog = float(t.get("cog", 0.0))
+            except Exception as e:
+                sog, cog = 0, 0
             tx0 = (lo - ref_lon) * 60 * cos_factor
             ty0 = (la - ref_lat) * 60
             arad = math.radians(cog)
             tgt_info.append((tx0, ty0, sog, arad))
-        # 타겟 개수에 맞게 빈 리스트 한 번만 생성
         res.targets_positions = [[] for _ in range(len(tgt_info))]
 
-        # 시뮬레이션 루프: 10초 간격 진행
+        safe_path_reached_time = None
+
         for sec in range(0, self.SIM_DURATION_SEC + 1, self.TIME_STEP_SEC):
             res.times.append(sec)
             traveled = own_sog * (sec / 3600.0)
@@ -210,16 +208,20 @@ class SimpulatePlotter(MarzipExtractor):
             if desired_dist <= total_safe_dist:
                 ox, oy = interpolate_along_route(safe_x, safe_y, desired_dist)
             else:
-                remain = desired_dist - total_safe_dist
-                if len(safe_x) > 0:
-                    sx_end, sy_end = safe_x[-1], safe_y[-1]
-                else:
-                    sx_end, sy_end = start_x, start_y
+                sx_end, sy_end = safe_x[-1], safe_y[-1]
+                if safe_path_reached_time is None:
+                    safe_path_reached_time = sec
 
+                if sec - safe_path_reached_time >= self.hinas_setup.get("TCPA_GW", 0) * 60:
+                    ox, oy = sx_end, sy_end
+                    res.own_positions.append((ox, oy))
+                    res.times.append(sec)
+                    break
+
+                remain = desired_dist - total_safe_dist
                 if len(base_x) > 1:
                     base_st = project_point_onto_polyline(sx_end, sy_end, base_x, base_y)
                     base_des = base_st + remain
-                    # base_route 끝 도달시 시뮬 종료
                     if base_des >= base_total_dist:
                         ox, oy = base_x[-1], base_y[-1]
                         res.own_positions.append((ox, oy))
@@ -232,7 +234,6 @@ class SimpulatePlotter(MarzipExtractor):
 
             res.own_positions.append((ox, oy))
 
-            # --- 타겟 위치 계산 (누적) ---
             for idx_t, (tx0, ty0, sog_t, arad) in enumerate(tgt_info):
                 dt = sog_t * (sec / 3600.0)
                 tx_ = tx0 + dt * math.sin(arad)
@@ -240,7 +241,7 @@ class SimpulatePlotter(MarzipExtractor):
                 res.targets_positions[idx_t].append((tx_, ty_))
                 dx_ = ox - tx_
                 dy_ = oy - ty_
-                dd_ = math.sqrt(dx_*dx_ + dy_*dy_)
+                dd_ = math.sqrt(dx_**2 + dy_**2)
                 if dd_ < res.min_distance:
                     res.min_distance = dd_
                     res.min_distance_time = sec
@@ -248,18 +249,10 @@ class SimpulatePlotter(MarzipExtractor):
                     res.is_fail = True
                     res.fail_time_sec = sec
 
-        if res.is_fail:
-            res.result_tag = "Collision"
-        else:
-            res.result_tag = "No Collision"
+        res.result_tag = "Collision" if res.is_fail else "No Collision"
         return res
 
     def simulate_event(self, event_index):
-        """
-        - 이벤트가 없으면 "NA - No Path"
-        - safe_route 없으면 이전 이벤트의 safe_route 사용 → 충돌이면 "NA Collision", 아니면 "NA - No Path"
-        - 정상: "Collision" 또는 "No Collision"
-        """
         res = SimulationResult()
         res.event_index = event_index
 
@@ -282,16 +275,13 @@ class SimpulatePlotter(MarzipExtractor):
                 res.result_tag = "NA - No Path"
                 return res
             else:
-                prev_sr = self.events[event_index-1].get("safe_route")
-                if not prev_sr or len(prev_sr) == 0:
+                prev_sr = self.events[event_index-1].get("safe_route", [])
+                if not prev_sr:
                     res.has_path = False
                     res.result_tag = "NA - No Path"
                     return res
                 sub_res = self.simulate_event_with_safe_route(event_index, prev_sr)
-                if sub_res.is_fail:
-                    sub_res.result_tag = "NA Collision"
-                else:
-                    sub_res.result_tag = "NA - No Path"
+                sub_res.result_tag = "NA Collision" if sub_res.is_fail else "NA - No Path"
                 return sub_res
         return self.simulate_event_with_safe_route(event_index, safe_r)
 
@@ -301,10 +291,7 @@ class SimpulatePlotter(MarzipExtractor):
         ax.set_aspect('equal')
 
     def plot_collision_event(self, sim_res, out_file):
-        """
-        충돌 이벤트 플롯 (그라데이션 + PLOT_SKIP 샘플링)
-        """
-        PLOT_SKIP = 6
+        PLOT_SKIP = 10
         idx = sim_res.event_index
         fig, ax = plt.subplots(figsize=(8, 6))
 
@@ -320,34 +307,24 @@ class SimpulatePlotter(MarzipExtractor):
         for pt in self.base_route:
             la = pt["position"]["latitude"]
             lo = pt["position"]["longitude"]
-            bx_ = (lo - ref_lon) * 60 * cos_factor
-            by_ = (la - ref_lat) * 60
-            bx.append(bx_)
-            by.append(by_)
+            bx.append((lo - ref_lon) * 60 * cos_factor)
+            by.append((la - ref_lat) * 60)
         if bx and by:
             ax.plot(bx, by, 'ko-', label='Base Route')
 
         e = self.events[idx]
-        if (sim_res.result_tag == "NA - No Path" or sim_res.result_tag == "NA Collision") and idx > 0:
+        if (sim_res.result_tag in ["NA - No Path", "NA Collision"]) and idx > 0:
             e = self.events[idx-1]
-        sr = e.get("safe_route")
+        sr = e.get("safe_route", [])
         if sr:
-            sx, sy = [], []
-            for pt in sr:
-                la = pt["position"]["latitude"]
-                lo = pt["position"]["longitude"]
-                sx_ = (lo - ref_lon) * 60 * cos_factor
-                sy_ = (la - ref_lat) * 60
-                sx.append(sx_)
-                sy.append(sy_)
+            sx = [ (pt["position"]["longitude"] - ref_lon)*60*cos_factor for pt in sr ]
+            sy = [ (pt["position"]["latitude"] - ref_lat)*60 for pt in sr ]
             ax.plot(sx, sy, 'o--', color='darkorange', label='Safe Route')
 
         own_pos = sim_res.own_positions
         n_own = len(own_pos)
         for chunk_i in range(0, n_own - 1, PLOT_SKIP):
-            nxt_i = chunk_i + PLOT_SKIP
-            if nxt_i >= n_own:
-                nxt_i = n_own - 1
+            nxt_i = min(chunk_i + PLOT_SKIP, n_own - 1)
             x0, y0 = own_pos[chunk_i]
             x1, y1 = own_pos[nxt_i]
             frac = chunk_i / (n_own - 1) if n_own > 1 else 0
@@ -355,15 +332,12 @@ class SimpulatePlotter(MarzipExtractor):
             ax.plot([x0, x1], [y0, y1], color='red', alpha=alpha_val, lw=2)
         if n_own > 0:
             fx, fy = own_pos[-1]
-            ax.scatter(fx, fy, marker='*', color='crimson', s=20, label='Own Ship(Final)')
+            ax.scatter(fx, fy, marker='*', color='crimson', s=20, label='Own Ship')
 
-        tgt_pos = sim_res.targets_positions
-        for t_i, tpos in enumerate(tgt_pos):
+        for t_i, tpos in enumerate(sim_res.targets_positions):
             m_ = len(tpos)
             for chunk_j in range(0, m_ - 1, PLOT_SKIP):
-                nxt_j = chunk_j + PLOT_SKIP
-                if nxt_j >= m_:
-                    nxt_j = m_ - 1
+                nxt_j = min(chunk_j + PLOT_SKIP, m_ - 1)
                 tx0, ty0 = tpos[chunk_j]
                 tx1, ty1 = tpos[nxt_j]
                 frac_t = chunk_j / (m_ - 1) if m_ > 1 else 0
@@ -378,10 +352,9 @@ class SimpulatePlotter(MarzipExtractor):
             if sim_res.fail_time_sec in sim_res.times:
                 f_idx = sim_res.times.index(sim_res.fail_time_sec)
                 cx, cy = own_pos[f_idx]
-                ax.scatter(cx, cy, edgecolor='yellow', facecolor='red',
-                           s=20, marker='o', lw=2, label='Collision Point', zorder=5)
+                ax.scatter(cx, cy, edgecolor='yellow', facecolor='red', s=20, marker='o', lw=2, label='Collision Point', zorder=5)
 
-        tag_txt = sim_res.result_tag if sim_res.result_tag else "Collision"
+        tag_txt = sim_res.result_tag or "Collision"
         info_list = [
             f"Event {idx} - {tag_txt}",
             f"Fail={sim_res.is_fail}, fail_time={sim_res.fail_time_sec}",
@@ -392,76 +365,110 @@ class SimpulatePlotter(MarzipExtractor):
         ax.set_ylabel("Latitude Offset (NM)")
         self.set_axis_limits_ownship(ax)
         ax.grid(True)
-        ax.legend()
-
-        disp_text = "\n".join(info_list)
-        ax.text(0.02, 0.98, disp_text, transform=ax.transAxes,
-                va='top', ha='left', fontsize=9,
+        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        fig.tight_layout()
+        ax.text(0.02, 0.98, "\n".join(info_list), transform=ax.transAxes, va='top', ha='left', fontsize=9,
                 bbox=dict(facecolor='white', alpha=0.7))
-
         fig.savefig(out_file)
         plt.close(fig)
 
+def load_partial_summary(summary_path):
+    if os.path.exists(summary_path):
+        with open(summary_path, "r", encoding="utf-8") as f:
+            try:
+                return json.load(f)
+            except Exception as e:
+                print(f"부분 요약 파일 로드 실패: {e}")
+    # 파일이 없으면 기본값 반환
+    return {
+        "grand_file_count": 0,
+        "grand_na_safe_target": 0,
+        "grand_na_no_path": 0,
+        "grand_na_collision": 0,
+        "grand_collision": 0,
+        "grand_no_collision": 0,
+        "total_fail_files": 0,
+        "total_na_files": 0,
+        "total_success_files": 0
+    }
+
+def save_partial_summary(summary_path, summary_dict):
+    with open(summary_path, "w", encoding="utf-8") as f:
+        json.dump(summary_dict, f, ensure_ascii=False, indent=4)
 ###############################################
 # 메인
 ###############################################
 def main():
-    base_data_dir = "/media/avikus/One Touch/HinasControlSilsCA/CA_v0.1.4_data/SiLS_sever2/Random_Testing/20250221_1/output"
-    base_result_dir = "analyze/Server2"
-
+    base_data_dir = "/media/avikus/One Touch/HinasControlSilsCA/CA_v0.1.4_data/Random"
+    base_result_dir = "analyze/CA_v0.1.4_data"
+    checkpoint_path = os.path.join(base_result_dir, "checkpoint.txt")
+    summary_path = os.path.join(base_result_dir, "partial_summary.json")
+    
+    # 이전에 처리한 파일 목록과 누적 통계를 불러옴
+    processed_files_set = set()
+    if os.path.exists(checkpoint_path):
+        with open(checkpoint_path, "r", encoding="utf-8") as cp:
+            for line in cp:
+                processed_files_set.add(line.strip())
+                
+    summary_dict = load_partial_summary(summary_path)
+    
+    grand_file_count = summary_dict.get("grand_file_count", 0)
+    grand_na_safe_target = summary_dict.get("grand_na_safe_target", 0)
+    grand_na_no_path = summary_dict.get("grand_na_no_path", 0)
+    grand_na_collision = summary_dict.get("grand_na_collision", 0)
+    grand_collision = summary_dict.get("grand_collision", 0)
+    grand_no_collision = summary_dict.get("grand_no_collision", 0)
+    total_fail_files = summary_dict.get("total_fail_files", 0)
+    total_na_files = summary_dict.get("total_na_files", 0)
+    total_success_files = summary_dict.get("total_success_files", 0)
+    
     file_mgr = FileInputManager(base_data_dir)
     marzip_files = file_mgr.get_all_marzip_files()
     if not marzip_files:
         print("마집 파일 없음.")
         return
 
-    print(f"마집 파일 총 {len(marzip_files)}개")
-
     analysis_log_path = os.path.join(base_result_dir, "analysis_log.txt")
     log_dir = os.path.dirname(analysis_log_path)
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
-
     with open(analysis_log_path, "a", encoding="utf-8") as lf:
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         lf.write(f"\n--- Analysis start: {now_str} ---\n")
-
-    # 전체 통계 (이벤트 단위)
-    grand_na_safe_target = 0
-    grand_na_no_path = 0
-    grand_na_collision = 0
-    grand_collision = 0
-    grand_no_collision = 0
-    grand_file_count = 0
-
-    # 파일 단위 통계
-    total_fail_files = 0
-    total_na_files = 0
-    total_success_files = 0
-
+    
+    processed_files = 0
+    last_processed_file = ""
+    
     for marzip_file in marzip_files:
+        if marzip_file in processed_files_set:
+            continue
+
         try:
+            processed_files += 1
             grand_file_count += 1
+            last_processed_file = marzip_file
+
             plotter = SimpulatePlotter(marzip_file)
             events_count = len(plotter.events)
-
-            # 파일 단위 결과
+            
+            # 파일 단위 로컬 통계
             local_na_safe = 0
             local_na_no_path = 0
             local_na_coll = 0
             local_coll = 0
             local_no_coll = 0
-
-            # <신규> 파일별 타겟 감지
             local_detection_count = 0
 
             if events_count == 0:
                 grand_na_safe_target += 1
-                total_na_files += 1  # NA 파일로 분류
+                total_na_files += 1
                 msg = f"[FOLDER_LOG] {marzip_file} => 0 events => Result=NA (NA-SafeTarget), detectionTargets=0\n"
                 print(msg, end="")
                 with open(analysis_log_path, "a", encoding="utf-8") as f:
                     f.write(msg)
+                with open(checkpoint_path, "a", encoding="utf-8") as cp:
+                    cp.write(marzip_file + "\n")
                 continue
             else:
                 for e_idx in range(events_count):
@@ -469,7 +476,7 @@ def main():
                     tg_raw = e_data.get("target_ships", [])
                     tg_flat = plotter.flatten(tg_raw)
                     local_detection_count += len(tg_flat)
-
+                    
                     sim_res = plotter.simulate_event(e_idx)
                     tag = sim_res.result_tag
 
@@ -479,7 +486,7 @@ def main():
                         local_na_no_path += 1
                     elif tag == "NA Collision":
                         local_na_coll += 1
-                        if PLOT_OPTION == "na_collision":
+                        if PLOT_OPTION in ("na_collision", "ALL"):
                             rel_path = os.path.relpath(marzip_file, base_data_dir)
                             result_subdir = os.path.join(base_result_dir, os.path.dirname(rel_path))
                             if not os.path.exists(result_subdir):
@@ -488,7 +495,7 @@ def main():
                             plotter.plot_collision_event(sim_res, out_file)
                     elif tag == "Collision":
                         local_coll += 1
-                        if PLOT_OPTION == "collision":
+                        if PLOT_OPTION in ("collision", "ALL"):
                             rel_path = os.path.relpath(marzip_file, base_data_dir)
                             result_subdir = os.path.join(base_result_dir, os.path.dirname(rel_path))
                             if not os.path.exists(result_subdir):
@@ -496,6 +503,13 @@ def main():
                             out_file = os.path.join(result_subdir, f"{os.path.splitext(os.path.basename(marzip_file))[0]}_ev{e_idx}_Collision.png")
                             plotter.plot_collision_event(sim_res, out_file)
                     elif tag == "No Collision":
+                        if PLOT_OPTION in ("ALL"):
+                            rel_path = os.path.relpath(marzip_file, base_data_dir)
+                            result_subdir = os.path.join(base_result_dir, os.path.dirname(rel_path))
+                            if not os.path.exists(result_subdir):
+                                os.makedirs(result_subdir)
+                            out_file = os.path.join(result_subdir, f"{os.path.splitext(os.path.basename(marzip_file))[0]}_ev{e_idx}_Pass.png")
+                            plotter.plot_collision_event(sim_res, out_file)
                         local_no_coll += 1
 
                 msg = (
@@ -531,11 +545,29 @@ def main():
                 grand_collision += local_coll
                 grand_no_collision += local_no_coll
 
+            # 각 파일 처리 후 summary_dict를 업데이트하여 중간 저장
+            summary_dict.update({
+                "grand_file_count": grand_file_count,
+                "grand_na_safe_target": grand_na_safe_target,
+                "grand_na_no_path": grand_na_no_path,
+                "grand_na_collision": grand_na_collision,
+                "grand_collision": grand_collision,
+                "grand_no_collision": grand_no_collision,
+                "total_fail_files": total_fail_files,
+                "total_na_files": total_na_files,
+                "total_success_files": total_success_files,
+            })
+            save_partial_summary(summary_path, summary_dict)
+            
+            with open(checkpoint_path, "a", encoding="utf-8") as cp:
+                cp.write(marzip_file + "\n")
+                
         except Exception as e:
-            print(f"[ERROR] 파일 처리 중 오류: {marzip_file}, {e}")
+            error_msg = f"[ERROR] 파일 처리 중 오류: {marzip_file}, {e}\n"
+            print(error_msg)
             with open(analysis_log_path, "a", encoding="utf-8") as f:
                 f.write(f"[ERROR] {marzip_file} 처리 중 예외 발생: {e}\n")
-
+    
     total_fail = grand_collision + grand_na_collision
     total_na = grand_na_safe_target + grand_na_no_path + grand_na_collision
     total_success = grand_no_collision
@@ -553,11 +585,11 @@ def main():
         f"  NA Files={total_na_files}\n"
         f"  SUCCESS Files={total_success_files}\n"
         f"  Total Files={grand_file_count}\n"
+        f"마지막 처리 파일: {os.path.basename(last_processed_file) if last_processed_file else '없음'}\n"
     )
     print(summary_msg)
     with open(analysis_log_path, "a", encoding="utf-8") as f:
         f.write(summary_msg)
-
 
 if __name__ == "__main__":
     main()
