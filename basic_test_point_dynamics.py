@@ -212,7 +212,7 @@ class SimpulatePlotter(MarzipExtractor):
                 if safe_path_reached_time is None:
                     safe_path_reached_time = sec
 
-                if sec - safe_path_reached_time >= self.hinas_setup.get("TCPA_GW", 0) * 60:
+                if sec - safe_path_reached_time >= self.hinas_setup.get("TCPA_GW", 60) * 60:
                     ox, oy = sx_end, sy_end
                     res.own_positions.append((ox, oy))
                     res.times.append(sec)
@@ -399,8 +399,9 @@ def save_partial_summary(summary_path, summary_dict):
 # 메인
 ###############################################
 def main():
-    base_data_dir = "/media/avikus/One Touch/HinasControlSilsCA/CA_v0.1.4_data/Random"
-    base_result_dir = "analyze/CA_v0.1.4_data"
+    base_data_dir = "/media/avikus/One Touch/HinasControlSilsCA/CA_v0.1.4_data/Random/20250226"
+    base_result_dir = "analyze/CA_v0.1.4_data/Test/20250226/"
+
     checkpoint_path = os.path.join(base_result_dir, "checkpoint.txt")
     summary_path = os.path.join(base_result_dir, "partial_summary.json")
     

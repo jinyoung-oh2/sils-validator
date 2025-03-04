@@ -235,10 +235,10 @@ class TargetShipTimeseriesAnalyzer(MarzipExtractor):
 
 def main():
     # Data directory
-    base_data_dir = "/media/avikus/One Touch/HinasControlSilsCA/CA_v0.1.4_data/SiLS_sever2/Random_Testing/20250221_1/output"
+    base_data_dir = "/media/avikus/One Touch/HinasControlSilsCA/CA_v0.1.4_data/Random/20250226"
     
     # Output base directory: replicate the same subfolder structure under this
-    output_base_dir = "timeseries/SiLS_sever2/Random_Testing/20250221_1"
+    output_base_dir = "timeseries/CA_v0.1.4_data/Random/20250226"
     
     analyzer = TargetShipTimeseriesAnalyzer()
     sampled_files = analyzer.get_sampled_marzip_files_by_folder(base_data_dir)

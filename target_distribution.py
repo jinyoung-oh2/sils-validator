@@ -610,20 +610,22 @@ class TargetDistribution(MarzipExtractor):
 
     def plot_event_distribution_by_colreg(self, output_file, convert_to_nm=True):
         """
-        수집된 이벤트 타겟 데이터를 기반으로, 각 타겟의 'colreg' 값(문자열 5개 케이스)에 따라 
+        수집된 이벤트 타겟 데이터를 기반으로, 각 타겟의 'colreg' 값이
+        지정된 경우에만(예: colreg_color_mapping에 정의된 값),
         다른 색상으로 분포를 플롯하고, 각 그룹별 타겟 개수를 레전드에 표기합니다.
         
         Parameters:
             output_file (str): 저장할 플롯 이미지 파일 경로.
             convert_to_nm (bool): 좌표를 해리 단위(Nautical Miles)로 변환할지 여부.
         """
-        # 기본 색상 매핑 (필요 시 사용자 정의로 대체)
+        # 기본 색상 매핑 (원하는 값만 포함)
         colreg_color_mapping = {
-            "HO": "red"
-            # "CR-GW": "blue",
-            # "CR-SO": "green",
-            # "OT-GW": "purple",
-            # "OT-SO": "orange"
+            "HO": "red",
+            "CR-GW": "blue",
+            "CR-SO": "green",
+            "OT-GW": "orange",
+            "OT-SO": "purple"
+            
         }
         
         # own_ship 데이터 확보
@@ -643,19 +645,24 @@ class TargetDistribution(MarzipExtractor):
             print("own_ship 위치 데이터가 불완전합니다.")
             return
 
-        # 각 타겟 레코드를 colreg 값에 따라 그룹핑
+        # 각 타겟 레코드를 colreg 값에 따라 그룹핑 (단, colreg 값이 지정된 경우에만)
         groups = {}
         for rec in self.all_event_targets:
-            # 레코드에 colreg 값이 없으면 기본값 할당
-            colreg_val = rec.get("colreg", "Unknown")
-            if colreg_val not in groups:
+            colreg_val = rec.get("colreg")
+            # colreg 값이 없거나, 지정된 매핑에 포함되지 않은 경우 건너뛰기
+            if colreg_val is None or colreg_val not in colreg_color_mapping:
                 continue
-                # groups[colreg_val] = {"lats": [], "lons": []}
+            if colreg_val not in groups:
+                groups[colreg_val] = {"lats": [], "lons": []}
             pos = rec.get("position")
             if not (pos and "latitude" in pos and "longitude" in pos):
                 continue
             groups[colreg_val]["lats"].append(pos.get("latitude"))
             groups[colreg_val]["lons"].append(pos.get("longitude"))
+
+        if not groups:
+            print("지정된 COLREG 값을 포함한 타겟 데이터가 없습니다.")
+            return
 
         fig, ax = plt.subplots(figsize=(12, 10))
         
@@ -672,9 +679,9 @@ class TargetDistribution(MarzipExtractor):
         
         # 각 그룹별로 산점도 플롯 (각 그룹에 포함된 타겟 개수를 레전드에 포함)
         for colreg_val, coords in groups.items():
-            color = colreg_color_mapping.get(colreg_val, "black")  # 매핑되지 않은 경우 기본 검정색 사용
+            color = colreg_color_mapping.get(colreg_val, "black")  # 매핑되지 않은 경우 기본 검정색 사용 (이 경우 발생하지 않음)
             count = len(coords["lats"])
-            ax.scatter(coords["lons"], coords["lats"], color=color, marker='o', s=5, alpha=0.5,
+            ax.scatter(coords["lons"], coords["lats"], color=color, marker='o', s=4, alpha=0.5,
                     label=f"COLREG: {colreg_val} ({count})")
 
         # own_ship 위치 표시
@@ -712,8 +719,8 @@ class TargetDistribution(MarzipExtractor):
 
 
 def main():
-    base_data_dir = "data/ver014_20250220_colregs_test_5"
-    output_dir = "result/ver014_20250220_colregs_test_5"
+    base_data_dir = "/media/avikus/One Touch/HinasControlSilsCA/CA_v0.1.4_data/COLREG_TESTING"
+    output_dir = "analyze/CA_v0.1.4_data/Colreg/20250227_1"
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
@@ -727,7 +734,7 @@ def main():
 
     # 공통 옵션 변수 정의
     sample_fraction = 1
-    max_workers = 4
+    max_workers = 8
     batch_size = 1000
 
     aggregator = TargetDistribution(base_data_dir)
@@ -742,16 +749,17 @@ def main():
     print(f"\nInitial targets count: {len(aggregator.all_targets)}")
     print(f"Event targets count: {len(aggregator.all_event_targets)}")
     
-    # 초기 타겟 플롯 생성 (기존 방식: SOG에 따라 색상)
-    # aggregator.plot_initial_distribution(output_file_initial, convert_to_nm=True)
-    # 이벤트 타겟 플롯 생성 (caPathGenFail 값에 따라 빨간색/초록색)
-    # aggregator.plot_event_distribution(output_file_event, convert_to_nm=True)
+    # # 초기 타겟 플롯 생성 (기존 방식: SOG에 따라 색상)
+    aggregator.plot_initial_distribution(output_file_initial, convert_to_nm=True)
+
+    # # 이벤트 타겟 플롯 생성 (caPathGenFail 값에 따라 빨간색/초록색)
+    aggregator.plot_event_distribution(output_file_event, convert_to_nm=True)
 
     aggregator.plot_event_distribution_by_colreg(output_file_colreg, convert_to_nm=True)
     # TCPA에 따라 플롯 생성
-    # aggregator.plot_event_distribution_by_tcpa(output_file_event_tcpa, convert_to_nm=True)
+    aggregator.plot_event_distribution_by_tcpa(output_file_event_tcpa, convert_to_nm=True)
 
-    ## RA Test
+    # ## RA Test
     # aggregator.plot_tcpacpa_scatter(output_file_tcpacpa)
 
 

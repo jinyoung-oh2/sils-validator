@@ -111,26 +111,24 @@ class MarzipExtractor:
         return events
 
     def _read_arrow_file(self, file_path):
-        """Arrow 파일을 메모리 매핑으로 읽습니다."""
+        """Arrow 파일을 일반 파일 읽기 방식으로 읽습니다."""
         try:
-            with pa.memory_map(file_path, 'r') as source:
-                try:
-                    reader = ipc.RecordBatchFileReader(source)
-                    table = reader.read_all()
-                except pa.lib.ArrowInvalid:
-                    with pa.memory_map(file_path, 'r') as source_stream:
-                        try:
-                            reader = ipc.RecordBatchStreamReader(source_stream)
-                            table = reader.read_all()
-                        except pa.lib.ArrowInvalid as e:
-                            print(f"[ERROR] Streaming format 실패: {file_path}, {e}")
-                            return None
+            with open(file_path, "rb") as f:
+                data = f.read()
+            buffer_reader = pa.BufferReader(data)
+            try:
+                reader = ipc.RecordBatchFileReader(buffer_reader)
+                table = reader.read_all()
+            except pa.lib.ArrowInvalid:
+                buffer_reader.seek(0)
+                reader = ipc.RecordBatchStreamReader(buffer_reader)
+                table = reader.read_all()
             gc.collect()  # 메모리 정리
             return table
         except Exception as e:
-            print(f"[ERROR] Arrow 파일 읽기 실패: {file_path}, {e}")
+            print(f"[ERROR] Arrow 파일 읽기 실패 (버퍼 방식): {file_path}, {e}")
             return None
-
+        
     def extract_and_save_simulation_result(self):
         """.marzip 파일 내 simulation_result 데이터를 추출하여 JSON으로 저장합니다."""
         extracted_files = []

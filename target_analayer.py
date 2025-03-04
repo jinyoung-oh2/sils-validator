@@ -1,12 +1,12 @@
 import os
 import concurrent.futures
+import gc
 import matplotlib
 matplotlib.use("Agg")  # 결과를 파일로 저장
 import matplotlib.pyplot as plt
 from scipy.stats import norm
 import numpy as np
-
-
+from tqdm import tqdm
 
 from basic_test_fail_anlyzer import BasicTestFailAnalyzer
 from file_input_manager import FileInputManager
@@ -19,7 +19,7 @@ class BasicTestFailAnalyzerWithExtendedPlot(BasicTestFailAnalyzer):
     분류별(ALL, N/A, Success, Fail)로 시각화하는 클래스입니다.
     
     각 파일 처리 결과는 다음과 같은 딕셔너리로 저장됩니다:
-      {"Folder": ..., "File": ..., "Result": ..., "initial": [sog, ...],
+      {"Result": ..., "initial": [sog, ...],
        "event": {"distanceToTarget": ..., "cpa": ..., "tcpa": ...} }
     """
     def __init__(self, base_data_dir):
@@ -82,22 +82,32 @@ class BasicTestFailAnalyzerWithExtendedPlot(BasicTestFailAnalyzer):
 
     def run_all_files(self):
         marzip_files = self.file_manager.get_all_marzip_files()
-        print(f"총 {len(marzip_files)}개의 마집 파일을 찾았습니다.")
+        total_files = len(marzip_files)
+        print(f"총 {total_files}개의 마집 파일을 찾았습니다.")
+
         results = []
-        with concurrent.futures.ProcessPoolExecutor() as executor:
-            for res in executor.map(self.evaluate_single_file, marzip_files):
-                if res is not None:
-                    results.append(res)
+        batch_size = 200  # 배치 크기는 시스템 상황에 따라 조정
+        num_batches = (total_files + batch_size - 1) // batch_size
+
+        for batch_index in range(num_batches):
+            start = batch_index * batch_size
+            end = start + batch_size
+            batch = marzip_files[start:end]
+            print(f"배치 {batch_index+1}/{num_batches} 처리 중...")
+            with concurrent.futures.ProcessPoolExecutor() as executor:
+                batch_results = list(tqdm(
+                    executor.map(self.evaluate_single_file, batch, chunksize=10),
+                    total=len(batch),
+                    desc=f"Batch {batch_index+1}/{num_batches}"
+                ))
+            results.extend([r for r in batch_results if r is not None])
+            # 배치 처리 후 메모리 해제
+            del batch_results, batch
+            gc.collect()
+
         self.results = results
 
     def plot_histogram_by_classification(self, data_list, parameter_name, output_file, draw_gaussian=False):
-        """
-        data_list: (파일마다의) 값 리스트의 딕셔너리 그룹 {"all": [...], "n/a": [...], "success": [...], "fail": [...]}
-        parameter_name: 파라미터 이름 (표시용)
-        output_file: 저장할 그림 파일 경로
-        draw_gaussian: True이면 히스토그램 위에 가우시안 피팅 곡선을 겹쳐 그립니다.
-        """
-        # 사용할 카테고리 (필요에 따라 확장 가능)
         ordered_categories = ["all"]
         categories = [cat for cat in ordered_categories if cat in data_list]
         n_cats = len(categories)
@@ -109,24 +119,16 @@ class BasicTestFailAnalyzerWithExtendedPlot(BasicTestFailAnalyzer):
         for ax, cat in zip(axs, categories):
             values = data_list[cat]
             if values:
-                # density=True 로 정규화된 히스토그램 그리기
                 counts, bins, patches = ax.hist(values, bins=20, density=True, 
                                                 color="skyblue", edgecolor="black", alpha=0.6)
                 
                 if draw_gaussian:
-                    # 데이터의 평균과 표준편차 계산
                     mean_val = np.mean(values)
                     std_val = np.std(values)
-                    
-                    # x 범위 지정
                     xmin, xmax = ax.get_xlim()
                     x = np.linspace(xmin, xmax, 200)
-                    
-                    # 정규분포 PDF 계산
                     pdf = norm.pdf(x, mean_val, std_val)
                     ax.plot(x, pdf, 'r', linewidth=2, label="Gaussian Fit")
-                    
-                    # 피크 (PDF 최댓값) 위치 계산 및 표시
                     peak_index = np.argmax(pdf)
                     peak_x = x[peak_index]
                     peak_y = pdf[peak_index]
@@ -136,7 +138,6 @@ class BasicTestFailAnalyzerWithExtendedPlot(BasicTestFailAnalyzer):
                                 arrowprops=dict(facecolor='black', shrink=0.05),
                                 horizontalalignment='center')
                     
-                    # 평균 및 1σ, 2σ, 3σ 위치에 수직선 그리기
                     ax.axvline(mean_val, color='blue', linestyle='--', linewidth=1, label="Mean")
                     ax.axvline(mean_val + std_val, color='green', linestyle='--', linewidth=1, label="1σ")
                     ax.axvline(mean_val - std_val, color='green', linestyle='--', linewidth=1)
@@ -156,72 +157,79 @@ class BasicTestFailAnalyzerWithExtendedPlot(BasicTestFailAnalyzer):
         plt.close()
         print(f"{parameter_name.upper()} 히스토그램이 {output_file}에 저장되었습니다. (Gaussian Fit: {draw_gaussian})")
 
-
+    def _plot_event_histogram(self, param, out_dir):
+        """하나의 이벤트 파라미터에 대해 히스토그램을 생성하는 헬퍼 함수."""
+        event_groups = {"all": []}
+        for r in self.results:
+            event_data = r.get("event")
+            if event_data is None:
+                continue
+            val = event_data.get(param)
+            if val is None:
+                continue
+            try:
+                fval = float(val)
+            except Exception:
+                continue
+            # 그룹 분류 함수
+            res = r.get("Result", "").lower()
+            event_groups["all"].append(fval)
+            if res.startswith("n/a"):
+                event_groups.setdefault("n/a", []).append(fval)
+            elif res.startswith("success"):
+                event_groups.setdefault("success", []).append(fval)
+            elif res.startswith("fail"):
+                event_groups.setdefault("fail", []).append(fval)
+        output_file = os.path.join(out_dir, f"classification_event_{param}_histogram.png")
+        self.plot_histogram_by_classification(
+            data_list=event_groups,
+            parameter_name=param,
+            output_file=output_file
+        )
 
     def run_and_save(self, out_dir):
         """
         - 모든 마집 파일을 처리(run_all_files)
         - 초기(initial)은 sog 파라미터 히스토그램 1장
-        - 이벤트(event)는 distanceToTarget, cpa, tcpa 히스토그램 3장
+        - 이벤트(event)는 distanceToTarget, cpa, tcpa 히스토그램 3장(병렬 처리)
         """
         self.run_all_files()
 
-        # 결과를 저장할 폴더 생성
         if not os.path.exists(out_dir):
             os.makedirs(out_dir)
 
-        # 그룹별 값 추출 함수 (결과의 Result 기준으로 분류)
-        def group_values(values, result):
-            groups = {"all": []}
-            groups["all"].extend(values)
-            res = result.lower()
-            if res.startswith("n/a"):
-                groups.setdefault("n/a", []).extend(values)
-            elif res.startswith("success"):
-                groups.setdefault("success", []).extend(values)
-            elif res.startswith("fail"):
-                groups.setdefault("fail", []).extend(values)
-            return groups
-
-        # initial - sog
+        # initial - sog 플롯은 단일 프로세스로 처리
         initial_groups = {"all": []}
         for r in self.results:
-            groups = group_values(r.get("initial", []), r.get("Result", ""))
-            # 모든 그룹에 대해 값 병합
-            for key, vals in groups.items():
-                initial_groups.setdefault(key, []).extend(vals)
+            res = r.get("Result", "").lower()
+            for sog in r.get("initial", []):
+                initial_groups["all"].append(sog)
+                if res.startswith("n/a"):
+                    initial_groups.setdefault("n/a", []).append(sog)
+                elif res.startswith("success"):
+                    initial_groups.setdefault("success", []).append(sog)
+                elif res.startswith("fail"):
+                    initial_groups.setdefault("fail", []).append(sog)
         self.plot_histogram_by_classification(
             data_list=initial_groups,
             parameter_name="sog",
             output_file=os.path.join(out_dir, "classification_initial_sog_histogram.png")
         )
 
-        # event - distanceToTarget, cpa, tcpa
-        for param in ["distanceToTarget", "cpa", "tcpa"]:
-            event_groups = {"all": []}
-            for r in self.results:
-                event_data = r.get("event", {})
-                val = event_data.get(param)
-                if val is None:
-                    continue
+        # 이벤트 플롯(여러 파라미터)을 병렬 처리
+        event_params = ["distanceToTarget", "cpa", "tcpa"]
+        with concurrent.futures.ProcessPoolExecutor() as executor:
+            futures = [executor.submit(self._plot_event_histogram, param, out_dir) for param in event_params]
+            for future in concurrent.futures.as_completed(futures):
                 try:
-                    fval = float(val)
-                except Exception:
-                    continue
-                groups = group_values([fval], r.get("Result", ""))
-                for key, vals in groups.items():
-                    event_groups.setdefault(key, []).extend(vals)
-            self.plot_histogram_by_classification(
-                data_list=event_groups,
-                parameter_name=f"{param}",
-                output_file=os.path.join(out_dir, f"classification_event_{param}_histogram.png")
-            )
+                    future.result()
+                except Exception as e:
+                    print(f"이벤트 플롯 생성 중 에러: {e}")
 
 
 def main():
-    base_data_dir = "data/ver014_20250220_colregs_test_5"
-    out_dir = "result/ver014_20250220_colregs_test_5"
-
+    base_data_dir = "/media/avikus/One Touch/HinasControlSilsCA/CA_v0.1.4_data/COLREG_TESTING"
+    out_dir = "analyze/CA_v0.1.4_data/Colreg/20250227_1"
     plotter = BasicTestFailAnalyzerWithExtendedPlot(base_data_dir)
     plotter.run_and_save(out_dir)
     print("DONE")
