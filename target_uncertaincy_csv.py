@@ -21,7 +21,7 @@ class TargetShipTimeseriesAnalyzer(MarzipExtractor):
             * CSV 칼럼: FilePath, TargetID, start_cog, end_cog, diff_cog, start_sog, end_sog, diff_sog
         
         추가로 반환:
-          - target_counts: { "FilePath": ..., "non_movement_count": ..., "movement_count": ... }
+          - target_counts: { "FilePath": ..., "non_movement_count": ..., "movement_count": ..., "total_count": ... }
           - duration_stats: { "FilePath": ..., "avg_duration": ..., "min_duration": ..., "max_duration": ... }
         
         CSV에 기록할 때, base_to_trim 이후의 상대경로만 FilePath로 기록합니다.
@@ -157,7 +157,8 @@ class TargetShipTimeseriesAnalyzer(MarzipExtractor):
         target_counts = {
             "FilePath": file_path_full,
             "non_movement_count": len(nm_groups),
-            "movement_count": len(m_groups)
+            "movement_count": len(m_groups),
+            "total_count": len(nm_groups) + len(m_groups)
         }
         
         # 타겟별 timeStamp duration 계산 (timeStamp가 있는 경우, 단위: ns)
@@ -177,26 +178,22 @@ class TargetShipTimeseriesAnalyzer(MarzipExtractor):
             if ts_list:
                 durations.append(max(ts_list) - min(ts_list))
         if durations:
-            # ns를 s로 변환 (1e9 ns = 1 s)하고 소수점은 제거
-            avg_duration = int(np.mean(durations) / 1e9)
-            min_duration = int(np.min(durations) / 1e9)
-            max_duration = int(np.max(durations) / 1e9)
+            # ns를 s로 변환 (1e9 ns = 1 s)하고 소수점 한 자리까지 표기
+            avg_duration = np.mean(durations) / 1e9
+            min_duration = np.min(durations) / 1e9
+            max_duration = np.max(durations) / 1e9
         else:
-            avg_duration = min_duration = max_duration = 0
+            avg_duration = min_duration = max_duration = 0.0
         
         duration_stats = {
             "FilePath": file_path_full,
-            "avg_duration": f"{avg_duration}",
-            "min_duration": f"{min_duration}",
-            "max_duration": f"{max_duration}"
+            "avg_duration": f"{avg_duration:.1f}",
+            "min_duration": f"{min_duration:.1f}",
+            "max_duration": f"{max_duration:.1f}"
         }
         
-        # 파일 처리 후 요약 메시지 출력
-        nm_count = len(nm_groups)
-        m_count = len(m_groups)
-        print(f"Processed file: {file_path_full} - {nm_count} non-movement targets, {m_count} movement targets.")
+        print(f"Processed file: {file_path_full} - {len(nm_groups)} non-movement targets, {len(m_groups)} movement targets.")
         
-        # 반환값 (추가 CSV 작성을 위한 정보)
         return {"target_counts": target_counts, "duration_stats": duration_stats}
 
     def get_all_marzip_files(self, base_dir):
@@ -210,9 +207,9 @@ class TargetShipTimeseriesAnalyzer(MarzipExtractor):
 
 def main():
     # 데이터 디렉토리 (모든 폴더 포함)
-    base_data_dir = "/media/avikus/One Touch/HinasControlSilsCA/CA_v0.1.4_data/Random/20250226"
+    base_data_dir = "/media/avikus/T7/SILS/(2025,0227) sils report, simulation data/Random_Testing"
     # CSV 저장용 출력 디렉토리
-    output_base_dir = "timeseries/CA_v0.1.4_data/Test/20250226"
+    output_base_dir = "timeseries/CA_v0.1.4_data/Test/20250227"
     os.makedirs(output_base_dir, exist_ok=True)
     
     # base_to_trim은 base_data_dir로 지정합니다.
@@ -228,7 +225,7 @@ def main():
     
     nm_fieldnames = ["FilePath", "TargetID", "cog mean", "cog std", "sog mean", "sog std"]
     m_fieldnames = ["FilePath", "TargetID", "start_cog", "end_cog", "diff_cog", "start_sog", "end_sog", "diff_sog"]
-    counts_fieldnames = ["FilePath", "non_movement_count", "movement_count"]
+    counts_fieldnames = ["FilePath", "non_movement_count", "movement_count", "total_count"]
     duration_fieldnames = ["FilePath", "avg_duration", "min_duration", "max_duration"]
     
     with open(nm_csv_file, "w", newline="") as nm_f, \
@@ -248,6 +245,10 @@ def main():
         
         for file_path in marzip_files:
             try:
+                # 파일 크기가 0byte이면 건너뜁니다.
+                if os.path.getsize(file_path) == 0:
+                    print(f"Skipping file (0 byte): {file_path}")
+                    continue
                 results = analyzer.analyze_timeseries(file_path, output_base_dir, base_to_trim,
                                                       nm_csv_writer=nm_writer, m_csv_writer=m_writer)
                 counts_writer.writerow(results["target_counts"])
